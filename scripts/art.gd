@@ -1141,6 +1141,11 @@ func _ready() -> void:
 	var strange: Dictionary = preload("res://scripts/art_strange.gd").SPRITES
 	for key in strange:
 		_tex[key] = _from_ascii(strange[key])
+	var farm: Dictionary = preload("res://scripts/art_farm.gd").SPRITES
+	for key in farm:
+		_tex[key] = _from_ascii(farm[key])
+	_tex["pine"] = _paint_pine()
+	_tex["gear"] = _from_ascii([".7.7.7.", "7777777", ".77.77.", "777.777", ".77.77.", "7777777", ".7.7.7."])
 	_paint_ground()
 	_tex["house"] = _paint_house()
 	_tex["coop"] = _paint_coop()
@@ -1241,6 +1246,33 @@ func _paint_ground() -> void:
 			_px(img, 4, 6, Color("8fb8d8"))
 			_px(img, 11, 10, Color("8fb8d8"))
 		_tex["tilled_wet" if wet else "tilled"] = ImageTexture.create_from_image(img)
+	# footpaths: packed dirt with pebbles, two variants
+	for v in 2:
+		var img := _img(16, 16)
+		img.fill(Color("c9a26b"))
+		for i in 18:
+			_px(img, rng.randi_range(0, 15), rng.randi_range(0, 15), Color("b08850"))
+		for i in 6:
+			var x := rng.randi_range(1, 13)
+			var y := rng.randi_range(1, 13)
+			_rect(img, x, y, 2, 1, Color("e0c08a"))
+			_px(img, x, y + 1, Color("8a6a40"))
+		_tex["path%d" % v] = ImageTexture.create_from_image(img)
+
+
+func _paint_pine() -> ImageTexture:
+	var img := _img(16, 30)
+	_rect(img, 7, 24, 2, 6, col("h"))
+	for y in range(0, 25):
+		var half := 1 + int(y * 0.3) + (2 if y % 6 >= 3 else 0)
+		for x in range(8 - half, 8 + half):
+			var c := col("m")
+			if x == 8 - half or x == 8 + half - 1 or y % 6 == 5:
+				c = col("g")
+			elif (x + y * 2) % 7 == 0:
+				c = col("3")
+			_px(img, x, y, c)
+	return ImageTexture.create_from_image(img)
 
 
 func _paint_house() -> ImageTexture:

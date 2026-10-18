@@ -7,19 +7,26 @@
 ## Concept
 A cozy idle game that lives in a narrow, always-on-top, borderless window docked to the side of the
 screen (like *Rusty's Retirement*). Cute procedural pixel art. A **Farmer** NPC runs his farm on his
-own: tilling, planting, watering, harvesting, selling, building, tearing down, rearranging, chatting
-in little speech bubbles, and reacting to weather, pests and predators. He can get hurt, poisoned,
-exhausted or faint if the player never helps.
+own: clearing the overgrowth grandpa left behind, planning (often silly-shaped) fields, laying
+paths, putting up fences, tilling, planting, watering, harvesting, selling, building, rearranging,
+chatting in little speech bubbles, and reacting to weather, pests and predators. He can get hurt,
+poisoned, exhausted or faint if the player never helps.
 
-The **player** does not control the farmer. Instead, **choice cards** drip-feed in at random
-intervals and pile up (hand cap 16). Each card offers **two choices - pick one**. Some choices have
-requirements (e.g. "3 sunflowers growing at once", "a lightning rod", "the Fleshy Tome", "night time")
-or costs (coins, eggs, ripe pumpkins, chickens, Lucky Charms). Rarer conditions give bigger rewards.
-Cards range from minor (coffee or soup?) to consequential and strange: occult visitors, aliens,
-devils, fairies. Choices can grant **relics** (permanent oddities with passive powers, some placed on
-the farm), unlock strange crops, schedule delayed consequences, and raise **Weirdness** (0-100),
-which unlocks stranger cards and weird random events. The player can open cards one by one or hit
-**OPEN ALL** to go through the whole hand in a row.
+Every farm is different: a random **biome** (woodland, rocky, brambles, meadow, marsh) shapes the
+heavy overgrowth (tall grass, weeds, bushes, brambles, rocks, boulders, logs, stumps, apple trees,
+pines), the house lands somewhere along the top, there may be ponds and junk grandpa left lying
+around, and the farmer gets a random **quirk** (tidy, artsy, handy, dreamer, sunflower nut, thrifty).
+
+The **player** does not control the farmer. Instead, a **choice card** slides into the **card box**
+every N minutes of real time (default 10, set in the Settings panel). The box holds 3: new cards
+push in from the left and the far-right card falls out and is trashed. The player can play cards
+from the box or from the **stash** (3 safe slots) at any time, and drag cards freely between them.
+Each card offers **two choices - pick one**, and since cards are rare every choice visibly changes
+the farm: a new field, paths, fences, buildings, trees, a pond, animals, townsfolk friends who visit
+every morning, permanent farmer **abilities**, weather, relics. Some choices have requirements or
+costs. Cards can also have **prerequisites** (`needs`): e.g. the Dark Altar sacrifice card only
+ever shows up once the farm has at least 1 of the 6 **dark totems**. Weirdness (0-100) unlocks
+stranger cards and events.
 
 On launch a **welcome screen** explains how to play; the player clicks through and picks one of
 **3 save slots** (each autosaves every 20s, and on menu/quit).
@@ -34,7 +41,8 @@ On launch a **welcome screen** explains how to play; the player clicks through a
   (DEL, then SURE?). On Windows `user://` is `%APPDATA%/Godot/app_userdata/IdleFarm/`.
 - Window: right side of the screen, vertically centred, 24px from the edge (`EDGE_PADDING` in
   main.gd); the `<`/`>` button flips it to the left.
-- Debug keys (only in debug builds): `F1` draw a card, `F2` +10 cards, `F3` random event,
+- Settings (gear button, top bar): card cadence (1-60 min), window side; saved in `user://settings.json`.
+- Debug keys (only in debug builds): `F1` push a card into the box, `F2` fill the box, `F3` random event,
   `F4` toggle 10x time speed, `F5` wipe current slot & back to menu, `F6` +10 weirdness.
 - MCP testing tip: `game_manage input_mouse` positions are in *window* pixels (2x the 192x432
   canvas in the editor's embedded view).
@@ -44,6 +52,7 @@ On launch a **welcome screen** explains how to play; the player clicks through a
 | File | Role |
 |---|---|
 | `scripts/art.gd` (autoload **Art**) | Palette, ASCII sprites → textures, procedural painters (house, coop, trees, ground), 3x5 pixel font (`draw_text`, `text_width`, `wrap`). |
+| `scripts/art_farm.gd` | ASCII sprites for overgrowth (tall grass, bush, bramble, boulder, log), compost, dark totem + altar, townsfolk icons. |
 | `scripts/art_strange.gd` | Extra ASCII sprites: visitors (`v_*`), relic structures, card art, strange crops, 7x7 relic icons (`r_*`). |
 | `scripts/game.gd` (autoload **Game**) | Global state: coins, level, clock/day, weather, hand of cards + drip timer, weirdness, relics, unlocked crops, favoured crop, pending (delayed) effects, buffs, farmer stats, inventory, log; data tables CROPS, STRUCTS, RELICS; slot paths + settings file. |
 | `scripts/deck.gd` (class **Deck**) | **The card content** (70 cards, pure data). Its header documents every requirement and effect keyword. Add new cards here. |
@@ -60,7 +69,22 @@ On launch a **welcome screen** explains how to play; the player clicks through a
 | `scripts/hud.gd` | In-game UI: top bar (coins/day/clock/weather, drag, menu/dock/min/close), status strip (HP/energy/mood/weirdness eye/buffs/activity/log), card tray (rarity borders, playable pip, OPEN ALL, relic shelf with tooltips), **choice-card modal**, speech bubbles & floating texts. |
 
 Logical resolution 192x432 (viewport stretch, integer scale, nearest filter). Layout:
-`0-16` top bar · `16-272` farm (12x16 tiles of 16px; the card modal overlays this) · `272-302` status · `302-432` card tray.
+`0-16` top bar · `16-368` farm (12x22 tiles of 16px; card modal / settings / farmer panel overlay it) ·
+`368-394` status · `394-432` card strip (stash left, box right).
+
+Key systems added in v0.3:
+- **World** (`world.gd`): ground types grass/tilled/path/water; `new_farm()` biome generation with two
+  noise layers; `CLEARABLE` overgrowth table (work time, tool, wood/stone drops, thorns); `fields`
+  planned from `SHAPES` (heart, smiley, checker, ring...) with sloppy nudges and a crop plan
+  (one crop / mixed / whim); `next_path_cell()` (0-1 BFS door -> bin/fields/well...), `next_fence_cell()`
+  (field perimeter with a gate), `pick_build_cell()`, `clear_overgrowth()`, `overgrow()`. Old 16-row
+  saves are extended with wild rows.
+- **Game**: `box`/`stash` slots, `add_card` push/trash, `move_card`, `card_interval()` from settings,
+  `perks`, `friends`, `totems`, `played` (card -> choice, for chains), `quirk`, `farm_name`,
+  building materials (wood/stone are kept, not sold; `can_afford`/`pay_for`).
+- **Cards**: `choose(where, slot, which)`, `once` cards, new needs (totems, played/chose, perks,
+  friends, cleared/overgrown %, fields, paths, pond, day...), farm-shaping effects (field, path,
+  fence, build, trees, pond, clear, overgrow, perk, friend, totem). Friends visit each morning.
 
 ## Exporting
 - `export_presets.cfg` has a **Windows Desktop** preset: x86_64, PCK embedded (single .exe), output
@@ -138,6 +162,24 @@ Logical resolution 192x432 (viewport stretch, integer scale, nearest filter). La
 - [x] Runs without script errors in the editor (MCP run + logs)
 - [x] Screenshot check of layout
 
+### v0.3: overgrown farms, card box & stash, impactful cards
+- [x] AGENTS.md: this is a Godot game; use the Godot AI MCP server
+- [x] Bigger farm view (12x22) and a slimmer card strip
+- [x] Random farm layouts: biome, house position, ponds, grandpa's leftovers, heavy overgrowth
+- [x] Clearing tasks with materials (wood/stone), thorns; never sealed into the yard
+- [x] Field planning in random/silly shapes with sloppy tiles and a crop plan per field
+- [x] Paths (paid in stone) and field fences with a gate (paid in wood), connected fence drawing
+- [x] Farmer quirks + farmer panel (click him): quirk, cleared %, materials, abilities, friends, relics, totems
+- [x] Card box (3, push + trash with animation) and stash (3), click to open, drag to move, STASH IT / TO BOX
+- [x] Timed arrivals (default 10 min) + Settings panel (cadence, window side); offline arrivals
+- [x] Card prerequisites: `needs`, `once`, played/chose chains; dark totem chain (6 sources) + Dark Altar
+- [x] Deck rewritten for impact (103 cards): perks, townsfolk friends, fields, paths, fences, buildings
+- [x] Verified via MCP: every card choice applied with no runtime errors and no missing art; totem gating;
+  box push/trash/stash/play; modal + stash button + settings click-tested; settings persist; save/reload
+- [ ] Balance pass for 10-minute cadence (coin rewards, how fast the farmer clears a farm)
+- [ ] Dedicated sprites for the townsfolk (they reuse the villager sprite with a tint)
+- [ ] Drag-and-drop not click-tested with real mouse drags yet (logic tested via game_eval)
+
 ## Next up / ideas (not started)
 - [ ] Balance pass on the deck (reward sizes vs. level scaling; how fast weirdness climbs)
 - [ ] More follow-up chains (tome -> ritual -> ?, the homunculus grows up, the stranger's contract)
@@ -151,7 +193,7 @@ Logical resolution 192x432 (viewport stretch, integer scale, nearest filter). La
 - [ ] Seasons (crop availability, snow weather)
 - [ ] More farmer personality: hobbies, a pet name, diary of the day's events
 - [ ] Achievements / farm stats panel
-- [ ] Settings panel (card interval, volume, dock, scale)
+- [ ] More settings (volume, scale) — card interval + dock side done in v0.3
 - [ ] Replace procedural art with hand-drawn PNGs (Art.tex() is the single lookup point)
 - [ ] Unit tests for Game economy & World pathfinding
 
@@ -184,3 +226,9 @@ Logical resolution 192x432 (viewport stretch, integer scale, nearest filter). La
   all weird events and all 15 relics in one run with zero runtime errors and no missing art;
   save -> menu -> other slot -> back restores relics/hand/pending/unlocked crops; a new slot starts
   clean. Balance: foxes dig only one crop each and never come on day 1.
+- 2026-10-18 - v0.3: AGENTS.md. Farms are now randomised and heavily overgrown (biomes, ponds,
+  house position, leftovers); the farmer clears it for wood/stone, plans silly-shaped fields, lays
+  paths and fences them. Cards: a 3-slot box (new card every 10 min, oldest falls out) + 3-slot
+  stash, settings panel for the cadence, prerequisites (dark totems -> Dark Altar), and a rewritten
+  103-card deck where every choice visibly changes the farm (fields, buildings, perks, townsfolk).
+  UI rebalanced towards the farm (352px farm view). Verified via MCP (see v0.3 checklist).

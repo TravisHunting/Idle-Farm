@@ -5,7 +5,7 @@ extends Node
 ## progress), autosave and debug keys.
 
 const BASE := Vector2i(192, 432)
-const FARM_RECT := Rect2(0, 16, 192, 256)
+const FARM_RECT := Rect2(0, 16, 192, 352)
 const EDGE_PADDING := 24          # screen pixels between the window and the screen edge
 const AUTOSAVE_EVERY := 20.0
 
@@ -50,8 +50,14 @@ func start_slot(n: int) -> void:
 	_build()
 	if not load_game():
 		world.new_farm()
-		Game.add_log("Day 1. A fresh start on an empty farm!")
-		world.farmer.say("My very own farm!", 4.0)
+		var intro := {"woodland": "The trees have taken over.", "rocky": "Rocks. So many rocks.",
+			"brambles": "Brambles everywhere!", "meadow": "The grass is waist-high.", "marsh": "Squelchy, muddy, froggy."}
+		Game.add_log("Day 1 at %s. %s" % [Game.farm_name, intro.get(world.biome, "")])
+		world.farmer.say(["Grandpa really let this place go...", "My very own (overgrown) farm!",
+			"Right. Where do I even start?"].pick_random(), 5.0)
+		# two cards to start with, so there's something to decide straight away
+		cards.draw_card()
+		cards.draw_card()
 		save_game()
 	Game.running = true
 	if welcome:
@@ -213,8 +219,8 @@ func save_game() -> void:
 	if world == null or world.farmer == null or not Game.running and _game_root == null:
 		return
 	var meta := {"day": Game.day, "level": Game.level(), "coins": Game.coins, "weird": int(Game.weird),
-		"relics": Game.relics.size(), "play_seconds": Game.play_seconds}
-	var d := {"version": 2, "time": Time.get_unix_time_from_system(), "meta": meta,
+		"relics": Game.relics.size(), "play_seconds": Game.play_seconds, "farm": Game.farm_name}
+	var d := {"version": 3, "time": Time.get_unix_time_from_system(), "meta": meta,
 		"game": Game.to_dict(), "world": world.to_dict()}
 	var fa := FileAccess.open(Game.slot_path(Game.slot), FileAccess.WRITE)
 	if fa:
@@ -260,13 +266,12 @@ func _offline_progress(seconds: float) -> void:
 	var el := clampf(seconds, 0.0, Game.OFFLINE_CAP)
 	if el < 60.0:
 		return
-	var avg := (Game.CARD_INTERVAL.x + Game.CARD_INTERVAL.y) * 0.5
-	var n := 0
-	for i in int(el / avg):
-		if Game.hand.size() >= Game.HAND_CAP:
-			break
-		if cards.draw_card() != "":
-			n += 1
+	# cards kept arriving while we were away (the box only ever holds the newest 3)
+	var total := Game.card_timer + el
+	var n := mini(int(total / Game.card_interval()), Game.BOX_SIZE + 1)
+	Game.card_timer = fmod(total, Game.card_interval())
+	for i in n:
+		cards.draw_card()
 	for c in world.crops:
 		var cr: Dictionary = world.crops[c]
 		if not cr.get("dead", false):
@@ -291,7 +296,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_F1:
 			cards.draw_card()
 		KEY_F2:
-			for i in 10:
+			for i in Game.BOX_SIZE:
 				cards.draw_card()
 		KEY_F3:
 			director.random_event()

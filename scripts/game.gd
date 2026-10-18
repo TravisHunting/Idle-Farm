@@ -1,6 +1,6 @@
 extends Node
 ## Game (autoload): global state + data tables.
-## Owns: economy, level, clock/day, weather value, the hand of choice cards (drip feed),
+## Owns: economy, level, clock/day, weather value, the card box + stash (timed arrivals),
 ## weirdness, relics, unlocked crops, buffs, farmer stats, inventory, the message log,
 ## pending (delayed) card consequences, and (de)serialisation of all of that.
 ## World/grid state is serialised by World; Main glues the two into one save slot file.
@@ -9,6 +9,7 @@ extends Node
 signal log_added(text: String)
 signal cards_changed
 signal card_arrived(id: String)
+signal card_trashed(id: String)
 signal draw_requested
 signal weather_changed(w: String)
 signal coins_changed
@@ -17,8 +18,10 @@ signal new_day(day: int)
 const SLOT_COUNT := 3
 const SETTINGS_PATH := "user://settings.json"
 const DAY_LENGTH := 480.0            # real seconds per in-game day
-const HAND_CAP := 16
-const CARD_INTERVAL := Vector2(40.0, 80.0)
+const BOX_SIZE := 3                  # new cards enter the box on the left, the far-right one is trashed
+const STASH_SIZE := 3                # cards the player keeps safe
+const CARD_MINUTES := [1, 2, 3, 5, 10, 15, 20, 30, 60]   # settings choices for the arrival cadence
+const DEFAULT_CARD_MINUTES := 10
 const LEVEL_THRESHOLDS := [0, 80, 250, 600, 1300, 2600, 5000, 9000, 15000]
 const OFFLINE_CAP := 8.0 * 3600.0
 
@@ -38,18 +41,22 @@ const ITEM_PRICES := {"egg": 6, "ore": 30, "wood": 3, "stone": 1, "honey": 12}
 const ITEM_NAMES := {"egg": "egg", "ore": "ore", "wood": "wood", "stone": "stone", "honey": "honey"}
 
 ## Things the farmer builds by himself. solid = blocks walking. movable = can be rearranged.
+## mats = building materials (from clearing the overgrowth) used on top of the coin cost.
 ## relic = only appears through cards (level 99 so he never builds it).
 const STRUCTS := {
-	"fence":     {"name": "fence",     "cost": 4,  "level": 1, "max": 14, "solid": true,  "movable": false, "hp": 60},
-	"scarecrow": {"name": "scarecrow", "cost": 25, "level": 1, "max": 2,  "solid": true,  "movable": true,  "hp": 80},
-	"flowerbed": {"name": "flower bed", "cost": 8, "level": 1, "max": 4,  "solid": false, "movable": true,  "hp": 40},
-	"bench":     {"name": "bench",     "cost": 15, "level": 1, "max": 1,  "solid": true,  "movable": true,  "hp": 60},
-	"sign":      {"name": "farm sign", "cost": 6,  "level": 1, "max": 1,  "solid": true,  "movable": true,  "hp": 50},
-	"well":      {"name": "well",      "cost": 45, "level": 2, "max": 1,  "solid": true,  "movable": false, "hp": 200},
-	"lamp":      {"name": "lamp post", "cost": 30, "level": 2, "max": 3,  "solid": true,  "movable": true,  "hp": 80},
-	"coop":      {"name": "chicken coop", "cost": 90, "level": 2, "max": 1, "solid": true, "movable": false, "hp": 150},
-	"beehive":   {"name": "beehive",   "cost": 60, "level": 3, "max": 2,  "solid": true,  "movable": true,  "hp": 60},
+	"fence":     {"name": "fence",     "cost": 0,  "mats": {"wood": 1}, "level": 1, "max": 40, "solid": true,  "movable": false, "hp": 60},
+	"scarecrow": {"name": "scarecrow", "cost": 20, "mats": {"wood": 2}, "level": 1, "max": 3,  "solid": true,  "movable": true,  "hp": 80},
+	"flowerbed": {"name": "flower bed", "cost": 6, "level": 1, "max": 6,  "solid": false, "movable": true,  "hp": 40},
+	"bench":     {"name": "bench",     "cost": 4,  "mats": {"wood": 3}, "level": 1, "max": 2,  "solid": true,  "movable": true,  "hp": 60},
+	"sign":      {"name": "farm sign", "cost": 2,  "mats": {"wood": 2}, "level": 1, "max": 1,  "solid": true,  "movable": true,  "hp": 50},
+	"compost":   {"name": "compost heap", "cost": 0, "mats": {"wood": 4}, "level": 1, "max": 1, "solid": true, "movable": false, "hp": 60},
+	"well":      {"name": "well",      "cost": 30, "mats": {"stone": 6}, "level": 2, "max": 1,  "solid": true,  "movable": false, "hp": 200},
+	"lamp":      {"name": "lamp post", "cost": 25, "level": 2, "max": 3,  "solid": true,  "movable": true,  "hp": 80},
+	"coop":      {"name": "chicken coop", "cost": 60, "mats": {"wood": 8}, "level": 2, "max": 1, "solid": true, "movable": false, "hp": 150},
+	"beehive":   {"name": "beehive",   "cost": 50, "level": 3, "max": 2,  "solid": true,  "movable": true,  "hp": 60},
 	"rod":       {"name": "lightning rod", "cost": 55, "level": 3, "max": 1, "solid": true, "movable": false, "hp": 999},
+	"altar":     {"name": "dark altar", "cost": 0, "level": 99, "max": 1, "solid": true, "movable": false, "hp": 999},
+	"totem":     {"name": "dark totem", "cost": 0, "level": 99, "max": 6, "solid": true, "movable": false, "hp": 999},
 	"idol":      {"name": "stone idol", "cost": 0, "level": 99, "max": 1, "solid": true, "movable": false, "hp": 999},
 	"obelisk":   {"name": "black obelisk", "cost": 0, "level": 99, "max": 1, "solid": true, "movable": false, "hp": 999},
 	"stones":    {"name": "standing stones", "cost": 0, "level": 99, "max": 1, "solid": true, "movable": false, "hp": 999},
@@ -76,6 +83,45 @@ const RELICS := {
 	"living_scarecrow": {"name": "Living Scarecrow", "icon": "r_scarecrow", "desc": "Scarecrows chase off pests."},
 }
 
+## Building materials: kept for building (fences, paths...) rather than sold.
+const MATERIALS := ["wood", "stone"]
+
+## Permanent farmer abilities won through cards (hooks in farmer.gd / world.gd / cards.gd).
+const PERKS := {
+	"strong_arms": {"name": "Strong Arms", "desc": "Clears overgrowth and chops twice as fast."},
+	"green_thumb": {"name": "Green Thumb", "desc": "Crops grow 30% faster."},
+	"quick_feet":  {"name": "Quick Feet", "desc": "Walks 35% faster."},
+	"tough":       {"name": "Tough as Boots", "desc": "Takes half damage."},
+	"big_can":     {"name": "Giant Watering Can", "desc": "Watering soaks the tiles around too."},
+	"haggler":     {"name": "Silver Tongue", "desc": "Produce sells for 30% more."},
+	"carpenter":   {"name": "Carpenter", "desc": "Builds twice as fast; fences and paths are free."},
+	"early_bird":  {"name": "Early Bird", "desc": "Rests twice as fast."},
+	"iron_gut":    {"name": "Iron Gut", "desc": "Immune to poison."},
+	"pied_piper":  {"name": "Pied Piper", "desc": "Critters flee when he gets close. No bites."},
+}
+
+## Townsfolk who befriend the farm through cards. Each drops by every morning with a gift.
+const FRIENDS := {
+	"gus":    {"name": "Farmer Gus", "icon": "r_gus", "sprite": "v_villager", "tint": "f7c6a0", "desc": "Plants a few turnips every morning."},
+	"betty":  {"name": "Betty the Baker", "icon": "r_pie", "sprite": "v_villager", "tint": "f19ec2", "desc": "Brings pie each morning: energy & mood."},
+	"smith":  {"name": "Old Smith", "icon": "r_anvil", "sprite": "v_villager", "tint": "94b0c2", "desc": "Mends every building and brings stone."},
+	"mayor":  {"name": "The Mayor", "icon": "r_sash", "sprite": "v_suit", "tint": "ffcd75", "desc": "Pays a daily farm subsidy."},
+	"kids":   {"name": "Village Kids", "icon": "r_kids", "sprite": "v_villager", "tint": "a7f070", "desc": "Pull up weeds and brush every morning."},
+	"doc":    {"name": "Doc Hollis", "icon": "r_doc", "sprite": "v_villager", "tint": "f4f4f4", "desc": "Free house calls. Heals daily."},
+}
+
+## The farmer's personality, rolled when a farm is founded.
+const QUIRKS := {
+	"tidy":      {"name": "Tidy", "desc": "Can't stand overgrowth; clears first."},
+	"artsy":     {"name": "Artsy", "desc": "Plants his fields in silly shapes."},
+	"builder":   {"name": "Handy", "desc": "Loves building fences and paths."},
+	"dreamer":   {"name": "Dreamer", "desc": "Wanders and chats a lot."},
+	"sunny":     {"name": "Sunflower Nut", "desc": "Plants sunflowers whenever he can."},
+	"thrifty":   {"name": "Thrifty", "desc": "Sells only when the cart is full."},
+}
+
+const TOTEMS_MAX := 6
+
 const WEATHER_NAMES := {"sunny": "Sunny", "cloudy": "Cloudy", "rain": "Rain", "storm": "Storm", "heat": "Heatwave"}
 
 var running := false     # false while the welcome screen is up
@@ -85,9 +131,15 @@ var total_earned := 0
 var day := 1
 var time_of_day := 0.27
 var weather := "sunny"
-var hand: Array = []     # choice-card ids waiting to be played
-var card_timer := 0.0
-var next_card_in := 12.0
+var box: Array = ["", "", ""]     # card box: new cards push in from the left, the right one is trashed
+var stash: Array = ["", "", ""]   # cards the player keeps safe ("" = empty slot)
+var card_timer := 0.0             # seconds since the last arrival
+var perks := {}          # id -> true (farmer abilities)
+var friends := {}        # id -> true (townsfolk)
+var totems := 0          # dark totems found (0..TOTEMS_MAX)
+var played := {}         # card id -> "a"/"b" (last choice made)
+var quirk := ""          # the farmer's personality
+var farm_name := ""
 var inventory := {}
 var buffs := {}          # name -> seconds left
 var charms := 0          # Lucky Charm stacks
@@ -103,7 +155,7 @@ var pending: Array = []  # [{t: seconds, fx: [...], note: ""}]
 var seen := {}           # card id -> times drawn
 var log_lines: Array = []
 var stats := {"harvested": 0, "shooed": 0, "cards": 0, "faints": 0, "built": 0}
-var settings := {"dock": "right"}
+var settings := {"dock": "right", "card_minutes": DEFAULT_CARD_MINUTES}
 var time_scale := 1.0    # debug speed-up
 var play_seconds := 0.0
 var _defaults := {}
@@ -120,12 +172,17 @@ func reset() -> void:
 	from_dict(_defaults.duplicate(true))
 	settings = keep
 	stats = {"harvested": 0, "shooed": 0, "cards": 0, "faints": 0, "built": 0}
-	hand = []
+	box = ["", "", ""]
+	stash = ["", "", ""]
 	relics = {}
 	unlocked = {}
 	pending = []
 	seen = {}
 	log_lines = []
+	perks = {}
+	friends = {}
+	totems = 0
+	played = {}
 
 
 func _process(delta: float) -> void:
@@ -142,12 +199,10 @@ func _process(delta: float) -> void:
 		new_day.emit(day)
 	if prev < 0.25 and time_of_day >= 0.25:
 		add_log("The sun rises.")
-	if hand.size() < HAND_CAP:
-		card_timer += d
-		if card_timer >= next_card_in:
-			card_timer = 0.0
-			next_card_in = randf_range(CARD_INTERVAL.x, CARD_INTERVAL.y)
-			draw_requested.emit()
+	card_timer += d
+	if card_timer >= card_interval():
+		card_timer = 0.0
+		draw_requested.emit()
 	for k in buffs.keys():
 		buffs[k] -= d
 		if buffs[k] <= 0.0:
@@ -221,7 +276,7 @@ func scaled_reward(n: int) -> int:
 
 
 func max_tilled() -> int:
-	return 4 + level() * 3
+	return 8 + level() * 5
 
 
 func crop_unlocked(id: String) -> bool:
@@ -238,10 +293,12 @@ func item_count(id: String) -> int:
 	return int(inventory.get(id, 0))
 
 
+## Sellable goods only (building materials are kept for building).
 func inventory_count() -> int:
 	var n := 0
 	for k in inventory:
-		n += int(inventory[k])
+		if not k in MATERIALS:
+			n += int(inventory[k])
 	return n
 
 
@@ -253,28 +310,125 @@ func item_price(id: String) -> int:
 
 func inventory_value(mult: float = 1.0) -> int:
 	var v := 0.0
+	if has_perk("haggler"):
+		mult *= 1.3
 	for k in inventory:
-		v += item_price(k) * int(inventory[k]) * mult
+		if not k in MATERIALS:
+			v += item_price(k) * int(inventory[k]) * mult
 	return int(v)
 
 
-# ---------------------------------------------------------------- cards / weird / relics
-func add_card(id: String) -> bool:
-	if hand.size() >= HAND_CAP or id == "":
+## Sells all produce (not materials); returns coins earned.
+func sell_goods(mult: float = 1.0) -> int:
+	var v := inventory_value(mult)
+	for k in inventory.keys():
+		if not k in MATERIALS:
+			inventory.erase(k)
+	if v > 0:
+		add_coins(v)
+	return v
+
+
+func can_afford(def: Dictionary) -> bool:
+	if coins < int(def.get("cost", 0)):
 		return false
-	hand.append(id)
+	if has_perk("carpenter") and int(def.get("cost", 0)) == 0:
+		return true
+	var m: Dictionary = def.get("mats", {})
+	for k in m:
+		if item_count(k) < int(m[k]):
+			return false
+	return true
+
+
+func pay_for(def: Dictionary) -> void:
+	add_coins(-int(def.get("cost", 0)))
+	if has_perk("carpenter") and int(def.get("cost", 0)) == 0:
+		return
+	var m: Dictionary = def.get("mats", {})
+	for k in m:
+		add_item(k, -int(m[k]))
+
+
+# ---------------------------------------------------------------- cards / weird / relics
+func card_interval() -> float:
+	return float(settings.get("card_minutes", DEFAULT_CARD_MINUTES)) * 60.0
+
+
+func next_card_left() -> float:
+	return maxf(0.0, card_interval() - card_timer)
+
+
+## A new card enters the box on the left and pushes the others right (into the first gap);
+## with no gap, the far-right card falls out and is trashed.
+func add_card(id: String) -> bool:
+	if id == "":
+		return false
+	var gap := box.find("")
+	if gap < 0:
+		var gone: String = box[BOX_SIZE - 1]
+		gap = BOX_SIZE - 1
+		add_log("A card fell out of the box: %s." % gone_title(gone))
+		card_trashed.emit(gone)
+	for i in range(gap, 0, -1):
+		box[i] = box[i - 1]
+	box[0] = id
 	seen[id] = int(seen.get(id, 0)) + 1
 	cards_changed.emit()
 	card_arrived.emit(id)
 	return true
 
 
-func remove_card(id: String) -> void:
-	var i := hand.find(id)
-	if i >= 0:
-		hand.remove_at(i)
+## Set by cards.gd so Game can name a card without knowing the deck.
+var title_of: Callable
+
+
+func gone_title(id: String) -> String:
+	return String(title_of.call(id)) if title_of.is_valid() else id
+
+
+func has_card(id: String) -> bool:
+	return id != "" and (id in box or id in stash)
+
+
+func card_at(where: String, i: int) -> String:
+	var arr: Array = box if where == "box" else stash
+	return String(arr[i]) if i >= 0 and i < arr.size() else ""
+
+
+## Empties a slot after a card was played.
+func take_card(where: String, i: int) -> void:
+	var arr: Array = box if where == "box" else stash
+	if i >= 0 and i < arr.size() and arr[i] != "":
+		arr[i] = ""
 		stats["cards"] = int(stats["cards"]) + 1
 		cards_changed.emit()
+
+
+## Moves (or swaps) a card between any two slots of the box/stash.
+func move_card(from_where: String, fi: int, to_where: String, ti: int) -> void:
+	if from_where == to_where and fi == ti:
+		return
+	var a: Array = box if from_where == "box" else stash
+	var b: Array = box if to_where == "box" else stash
+	if fi < 0 or ti < 0 or fi >= a.size() or ti >= b.size():
+		return
+	var tmp: String = b[ti]
+	b[ti] = a[fi]
+	a[fi] = tmp
+	cards_changed.emit()
+
+
+func card_count() -> int:
+	var n := 0
+	for id in box + stash:
+		if id != "":
+			n += 1
+	return n
+
+
+func has_perk(id: String) -> bool:
+	return perks.has(id)
 
 
 func add_weird(n: float) -> void:
@@ -330,7 +484,9 @@ func slot_path(n: int) -> String:
 func to_dict() -> Dictionary:
 	return {
 		"coins": coins, "total_earned": total_earned, "day": day, "time_of_day": time_of_day,
-		"weather": weather, "hand": hand, "card_timer": card_timer, "next_card_in": next_card_in,
+		"weather": weather, "box": box, "stash": stash, "card_timer": card_timer,
+		"perks": perks, "friends": friends, "totems": totems, "played": played, "quirk": quirk,
+		"farm_name": farm_name,
 		"inventory": inventory, "buffs": buffs, "charms": charms, "health": health, "energy": energy,
 		"mood": mood, "poison": poison, "stats": stats, "log": log_lines, "weird": weird,
 		"relics": relics, "unlocked": unlocked, "favor_crop": favor_crop, "pending": pending,
@@ -344,11 +500,15 @@ func from_dict(d: Dictionary) -> void:
 	day = int(d.get("day", day))
 	time_of_day = float(d.get("time_of_day", time_of_day))
 	weather = String(d.get("weather", weather))
-	hand = []
-	for id in d.get("hand", []):
-		hand.append(String(id))
+	box = _slots(d.get("box", d.get("hand", [])), BOX_SIZE)
+	stash = _slots(d.get("stash", []), STASH_SIZE)
 	card_timer = float(d.get("card_timer", 0.0))
-	next_card_in = float(d.get("next_card_in", 30.0))
+	perks = d.get("perks", {})
+	friends = d.get("friends", {})
+	totems = int(d.get("totems", 0))
+	played = d.get("played", {})
+	quirk = String(d.get("quirk", ""))
+	farm_name = String(d.get("farm_name", ""))
 	inventory = {}
 	var inv: Dictionary = d.get("inventory", {})
 	for k in inv:
@@ -370,3 +530,10 @@ func from_dict(d: Dictionary) -> void:
 	for k in s:
 		stats[k] = int(s[k])
 	log_lines = d.get("log", [])
+
+
+func _slots(src: Array, n: int) -> Array:
+	var out: Array = []
+	for i in n:
+		out.append(String(src[i]) if i < src.size() and src[i] != null else "")
+	return out

@@ -181,6 +181,9 @@ func _random_crop() -> Variant:
 func update(d: float) -> void:
 	anim_t += d
 	bubble_t -= d
+	# Pied Piper perk: threats scatter when the farmer comes near
+	if Game.has_perk("pied_piper") and is_threat() and state != "leave" and kind != "boar" and _farmer_near(30.0):
+		scare()
 	match kind:
 		"crow", "rabbit": _update_pest(d)
 		"fox": _update_fox(d)
@@ -329,7 +332,8 @@ func bite_farmer() -> void:
 	if f == null or not f.visible_outside():
 		return
 	f.say("YEOW! A snake!")
-	Game.poison = 25.0
+	if not Game.has_perk("iron_gut"):
+		Game.poison = 25.0
 	f.hurt(6, "a snake bite")
 	Game.add_log("The farmer stepped on a snake and got poisoned!")
 	dead = true
@@ -410,10 +414,8 @@ func _update_merchant(d: float) -> void:
 		"trade":
 			timer -= d
 			if timer <= 0.0:
-				var v := Game.inventory_value(1.5)
+				var v := Game.sell_goods(1.5)
 				if v > 0:
-					Game.add_coins(v)
-					Game.inventory.clear()
 					world.float_text("+%d" % v, pos + Vector2(-6, -24))
 					Game.add_log("The merchant bought everything for %d coins!" % v)
 					say("Splendid produce!")

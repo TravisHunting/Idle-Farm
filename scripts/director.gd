@@ -190,7 +190,7 @@ func random_event(force: String = "") -> void:
 		ev["butterflies"] = 4
 	if world.cells_with_obj(["tree"] + Game.STRUCTS.keys()).size() > 0:
 		ev["wasps"] = 3
-	ev["weeds"] = 5
+	ev["weeds"] = 5 if world.cleared_ratio() > 0.7 else 1
 	if Game.inventory_count() > 0:
 		ev["merchant"] = 2
 	ev["lucky"] = 4 if Game.has_relic("black_cat") else 1
@@ -274,11 +274,11 @@ func run_event(id: String) -> void:
 			Game.add_log("A travelling merchant arrives.")
 		"butterflies":
 			for i in randi_range(3, 5):
-				spawn_animal("butterfly", Vector2(randf_range(10, 180), randf_range(20, 240)))
+				spawn_animal("butterfly", Vector2(randf_range(10, 180), randf_range(20, world.ROWS * 16 - 16)))
 			Game.mood = minf(100.0, Game.mood + 4.0)
 		"wisps":
 			for i in randi_range(4, 7):
-				spawn_animal("wisp", Vector2(randf_range(10, 180), randf_range(30, 240)))
+				spawn_animal("wisp", Vector2(randf_range(10, 180), randf_range(30, world.ROWS * 16 - 16)))
 			Game.add_log("Pale wisps drift across the fields.")
 		"knock":
 			Game.add_log("Someone knocked three times. Nobody was there. A card lay on the step.")
@@ -420,7 +420,7 @@ func do_action(id: String) -> void:
 			if spot == null:
 				var free := world.free_grass_cells()
 				if free.size() > 0:
-					spot = world.nearest(free, Vector2i(6, 8))
+					spot = world.nearest(free, world.DOOR + Vector2i(0, 4))
 					world.set_tilled(spot, true)
 			if spot != null:
 				world.plant(spot, "melon")
@@ -465,7 +465,7 @@ func do_action(id: String) -> void:
 				var c3 := Vector2i(randi() % world.COLS, randi() % world.ROWS)
 				world.gvar[world.idx(c3)] = 3
 			for i in 4:
-				spawn_animal("butterfly", Vector2(randf_range(10, 180), randf_range(20, 240)))
+				spawn_animal("butterfly", Vector2(randf_range(10, 180), randf_range(20, world.ROWS * 16 - 16)))
 			Game.mood = minf(100.0, Game.mood + 15.0)
 			Game.add_log("Flowers bloom all over the farm!")
 			if f:
@@ -501,6 +501,12 @@ func do_action(id: String) -> void:
 			for i in 2:
 				spawn_animal("rabbit", _edge_pos())
 			Game.add_log("Critters incoming! +6 coins per shoo.")
+		"repair":
+			for c in world.objs:
+				var o: Dictionary = world.objs[c]
+				if Game.STRUCTS.has(o["type"]):
+					o["hp"] = Game.STRUCTS[o["type"]]["hp"]
+			Game.add_log("Every building on the farm is good as new.")
 		"quake":
 			shake.emit(5.0)
 			var weeds: Array = world.cells_with_obj(["weed"])

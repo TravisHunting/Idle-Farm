@@ -1,16 +1,20 @@
 extends Control
 ## All in-game UI, custom-drawn with the pixel font. Sits on a CanvasLayer so the night tint skips it.
-## Layout (192x432): 0-16 top bar · 16-272 farm · 272-302 status · 302-432 card tray.
-## The choice-card modal is drawn over the farm area while a card is open.
+## Layout (192x432): 0-16 top bar · 16-368 farm · 368-394 status · 394-432 card strip.
+## Card strip: STASH (3 slots, kept safe) on the left, the card BOX (3 slots) on the right.
+## New cards push into the box from the left; the far-right card falls off the edge.
+## Click a card to open it (the choice modal is drawn over the farm); drag cards between slots.
+## Also: the settings panel (gear) and the farmer panel (click the farmer).
 ## Input is handled in _input() with manual hit-testing (mouse_filter = IGNORE).
 
 const FARM_Y := 16
-const STATUS_Y := 272
-const TRAY_Y := 302
-const SLOT_W := 29
-const SLOT_H := 28
-const COLS := 6
-const ROWS := 3
+const STATUS_Y := 368
+const TRAY_Y := 394
+const SLOT_W := 28
+const SLOT_H := 27
+const SLOT_Y := 403
+const STASH_X := [4, 34, 64]
+const BOX_X := [100, 130, 160]
 
 const C_BG := Color("1a1c2c")
 const C_PANEL := Color("262b44")
@@ -22,35 +26,41 @@ const C_GOLD := Color("ffcd75")
 const C_RED := Color("e43b44")
 const C_GREEN := Color("a7f070")
 const C_PURPLE := Color("b45cff")
+const C_WOOD := Color("c28a5a")
 const C_SHADOW := Color(0, 0, 0, 0.6)
 
-const MODAL := Rect2(6, 19, 180, 250)
-const BOX_A := Rect2(10, 104, 172, 64)
-const BOX_B := Rect2(10, 172, 172, 64)
-const LATER := Rect2(70, 242, 52, 13)
+const MODAL := Rect2(6, 106, 180, 258)
+const PANEL := Rect2(6, 20, 180, 200)
 
 var world: World
 var director: Node
 var cards: Node
 var main: Node
 
-var hover_card := ""
+var hover_slot := []          # ["box"|"stash", i] or []
 var hover_btn := ""
 var hover_choice := ""
-var hover_relic := ""
-var open_card := ""
-var chain := false          # "open all" mode: next card opens after choosing
-var dragging := false
+var open_id := ""             # card id open in the modal
+var open_where := ""
+var open_i := -1
+var settings_open := false
+var panel_open := false
+var dragging := false         # window drag
 var drag_off := Vector2i.ZERO
+var press_slot := []          # slot pressed (click or card drag)
+var press_pos := Vector2.ZERO
+var card_drag := false
+var mouse := Vector2.ZERO
 var pulse := {}
+var trash_anim := {}          # {id, t}
 var log_flash := 0.0
 var t := 0.0
 var btns := {
-	"menu": Rect2(147, 3, 9, 9),
+	"menu": Rect2(136, 3, 9, 9),
+	"gear": Rect2(147, 3, 9, 9),
 	"dock": Rect2(158, 3, 9, 9),
 	"min": Rect2(169, 3, 9, 9),
 	"close": Rect2(180, 3, 9, 9),
-	"openall": Rect2(144, 416, 45, 13),
 }
 
 
@@ -58,15 +68,37 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	size = Vector2(192, 432)
 	Game.card_arrived.connect(_on_card_arrived)
+	Game.card_trashed.connect(_on_card_trashed)
 	Game.log_added.connect(_on_log)
+	Game.cards_changed.connect(_on_cards_changed)
 
 
 func _on_card_arrived(id: String) -> void:
-	pulse[id] = 1.5
+	pulse[id] = 2.0
+
+
+func _on_card_trashed(id: String) -> void:
+	trash_anim = {"id": id, "t": 0.0}
 
 
 func _on_log(_text: String) -> void:
 	log_flash = 1.0
+
+
+## Cards shift around in the box: keep the open modal pointed at the same card.
+func _on_cards_changed() -> void:
+	if open_id == "":
+		return
+	if Game.card_at(open_where, open_i) == open_id:
+		return
+	for w in ["box", "stash"]:
+		var arr: Array = Game.box if w == "box" else Game.stash
+		var i := arr.find(open_id)
+		if i >= 0:
+			open_where = w
+			open_i = i
+			return
+	_close_modal()
 
 
 func _process(delta: float) -> void:
@@ -75,108 +107,220 @@ func _process(delta: float) -> void:
 		pulse[k] -= delta
 		if pulse[k] <= 0.0:
 			pulse.erase(k)
+	if not trash_anim.is_empty():
+		trash_anim["t"] += delta
+		if trash_anim["t"] > 1.2:
+			trash_anim = {}
 	log_flash = maxf(0.0, log_flash - delta)
-	if open_card != "" and not (open_card in Game.hand):
-		open_card = ""
 	queue_redraw()
 
 
 # ---------------------------------------------------------------- input
-func _slot_rect(i: int) -> Rect2:
-	var col := i % COLS
-	var row := i / COLS
-	return Rect2(4 + col * (SLOT_W + 2), TRAY_Y + 12 + row * (SLOT_H + 2), SLOT_W, SLOT_H)
+func _slot_rect(where: String, i: int) -> Rect2:
+	var xs: Array = BOX_X if where == "box" else STASH_X
+	return Rect2(xs[i], SLOT_Y, SLOT_W, SLOT_H)
+
+
+func _slot_at(p: Vector2) -> Array:
+	for w in ["stash", "box"]:
+		for i in 3:
+			if _slot_rect(w, i).grow(1).has_point(p):
+				return [w, i]
+	return []
+
+
+func _modal_rects() -> Dictionary:
+	var y := MODAL.position.y
+	return {
+		"a": Rect2(10, y + 87, 172, 64),
+		"b": Rect2(10, y + 155, 172, 64),
+		"later": Rect2(14, y + 226, 74, 13),
+		"move": Rect2(104, y + 226, 74, 13),
+	}
+
+
+func _settings_rects() -> Dictionary:
+	var y := PANEL.position.y
+	return {
+		"min_down": Rect2(100, y + 30, 11, 11), "min_up": Rect2(170, y + 30, 11, 11),
+		"dock_side": Rect2(100, y + 52, 81, 11),
+		"next_now": Rect2(100, y + 74, 81, 11),
+		"done": Rect2(66, y + 176, 60, 14),
+	}
 
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
+		mouse = event.position
 		if dragging:
 			DisplayServer.window_set_position(DisplayServer.mouse_get_position() - drag_off)
 			return
+		if not press_slot.is_empty() and not card_drag and mouse.distance_to(press_pos) > 3.0:
+			card_drag = true
 		_update_hover(event.position)
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		var p: Vector2 = event.position
+		mouse = p
 		if not event.pressed:
 			dragging = false
+			_release(p)
 			return
-		var p: Vector2 = event.position
 		_update_hover(p)
-		if hover_btn != "":
-			match hover_btn:
-				"menu": main.back_to_menu()
-				"dock": main.toggle_dock()
-				"min": main.minimize()
-				"close": main.save_and_quit()
-				"openall":
-					if Game.hand.size() > 0:
-						chain = true
-						open_card = Game.hand[0]
-				"later":
-					open_card = ""
-					chain = false
+		_press(p)
+
+
+func _press(p: Vector2) -> void:
+	if hover_btn in btns:
+		match hover_btn:
+			"menu": main.back_to_menu()
+			"gear":
+				settings_open = not settings_open
+				_close_modal()
+				panel_open = false
+			"dock": main.toggle_dock()
+			"min": main.minimize()
+			"close": main.save_and_quit()
+		return
+	if settings_open:
+		_settings_click(p)
+		return
+	if open_id != "":
+		if hover_choice != "":
+			var c: Dictionary = cards.card(open_id)
+			if cards.can_choose(c, hover_choice):
+				cards.choose(open_where, open_i, hover_choice)
+				_close_modal()
 			return
-		if open_card != "":
-			if hover_choice != "":
-				var c: Dictionary = cards.card(open_card)
-				if cards.can_choose(c, hover_choice):
-					cards.choose(open_card, hover_choice)
-					open_card = Game.hand[0] if chain and Game.hand.size() > 0 else ""
-					if open_card == "":
-						chain = false
-			elif not MODAL.has_point(p) and p.y >= FARM_Y and p.y < STATUS_Y:
-				open_card = ""
-				chain = false
-			if p.y < TRAY_Y:
-				return
-		if hover_card != "":
-			open_card = hover_card
-			chain = false
+		if hover_btn == "later":
+			_close_modal()
 			return
-		if p.y < FARM_Y and not main.embedded:
-			dragging = true
-			drag_off = DisplayServer.mouse_get_position() - DisplayServer.window_get_position()
+		if hover_btn == "move":
+			_move_open_card()
 			return
-		if open_card == "" and p.y >= FARM_Y and p.y < STATUS_Y:
-			var wp := p - Vector2(0, FARM_Y)
-			var f := world.farmer
-			if f and f.pos.distance_to(wp + Vector2(0, 6)) < 12.0:
-				f.on_click()
+		if MODAL.has_point(p):
+			return
+		if p.y >= FARM_Y and p.y < STATUS_Y:
+			_close_modal()
+			return
+	var s := _slot_at(p)
+	if not s.is_empty() and Game.card_at(s[0], s[1]) != "":
+		press_slot = s
+		press_pos = p
+		card_drag = false
+		return
+	if p.y < FARM_Y and not main.embedded:
+		dragging = true
+		drag_off = DisplayServer.mouse_get_position() - DisplayServer.window_get_position()
+		return
+	if p.y >= FARM_Y and p.y < STATUS_Y:
+		var wp := p - Vector2(0, FARM_Y)
+		var f := world.farmer
+		if f and f.visible_outside() and f.pos.distance_to(wp + Vector2(0, 6)) < 12.0:
+			f.on_click()
+			panel_open = not panel_open
+		else:
+			panel_open = false
+
+
+func _release(p: Vector2) -> void:
+	if press_slot.is_empty():
+		return
+	var from: Array = press_slot
+	press_slot = []
+	if card_drag:
+		card_drag = false
+		var to := _slot_at(p)
+		if not to.is_empty():
+			Game.move_card(from[0], from[1], to[0], to[1])
+		return
+	_open(from[0], from[1])
+
+
+func _open(where: String, i: int) -> void:
+	var id := Game.card_at(where, i)
+	if id == "":
+		return
+	open_id = id
+	open_where = where
+	open_i = i
+	panel_open = false
+
+
+func _close_modal() -> void:
+	open_id = ""
+	open_where = ""
+	open_i = -1
+
+
+## Box -> first free stash slot, stash -> first free box slot.
+func _move_open_card() -> void:
+	var other := "stash" if open_where == "box" else "box"
+	var arr: Array = Game.stash if other == "stash" else Game.box
+	var free := arr.find("")
+	if free < 0:
+		return
+	Game.move_card(open_where, open_i, other, free)
+
+
+func _settings_click(p: Vector2) -> void:
+	var r := _settings_rects()
+	var opts: Array = Game.CARD_MINUTES
+	var cur := opts.find(int(Game.settings.get("card_minutes", Game.DEFAULT_CARD_MINUTES)))
+	if cur < 0:
+		cur = opts.find(Game.DEFAULT_CARD_MINUTES)
+	if r["min_down"].has_point(p):
+		Game.settings["card_minutes"] = opts[maxi(0, cur - 1)]
+		Game.save_settings()
+	elif r["min_up"].has_point(p):
+		Game.settings["card_minutes"] = opts[mini(opts.size() - 1, cur + 1)]
+		Game.save_settings()
+	elif r["dock_side"].has_point(p):
+		main.toggle_dock()
+	elif r["next_now"].has_point(p) and OS.is_debug_build():
+		Game.card_timer = Game.card_interval()
+	elif r["done"].has_point(p) or not PANEL.has_point(p):
+		settings_open = false
 
 
 func _update_hover(p: Vector2) -> void:
 	hover_btn = ""
-	hover_card = ""
+	hover_slot = []
 	hover_choice = ""
-	hover_relic = ""
-	if open_card == "" and hover_card == "" and p.y >= 415 and p.y <= 425:
-		var i := int((p.x - 4) / 9.0)
-		var ids := Game.relics.keys()
-		if p.x >= 4 and i < ids.size() and i < 15:
-			hover_relic = ids[i]
 	for k in btns:
 		if btns[k].has_point(p):
-			if k == "openall" and Game.hand.is_empty():
-				continue
 			hover_btn = k
 			return
-	if open_card != "":
-		if LATER.has_point(p):
+	if settings_open:
+		var sr := _settings_rects()
+		for k in sr:
+			if sr[k].has_point(p):
+				hover_btn = k
+				return
+		return
+	if open_id != "":
+		var mr := _modal_rects()
+		if mr["later"].has_point(p):
 			hover_btn = "later"
 			return
-		if BOX_A.has_point(p):
+		if mr["move"].has_point(p):
+			hover_btn = "move"
+			return
+		if mr["a"].has_point(p):
 			hover_choice = "a"
 			return
-		if BOX_B.has_point(p):
+		if mr["b"].has_point(p):
 			hover_choice = "b"
 			return
-	for i in Game.hand.size():
-		if i < COLS * ROWS and _slot_rect(i).has_point(p):
-			hover_card = Game.hand[i]
-			return
+	hover_slot = _slot_at(p)
 
 
 # ---------------------------------------------------------------- drawing helpers
 func _txt(s: String, p: Vector2, c: Color = C_TEXT) -> void:
 	Art.draw_text(self, s, p, c, C_SHADOW)
+
+
+func _ctxt(s: String, y: float, c: Color = C_TEXT) -> void:
+	_txt(s, Vector2(96 - Art.text_width(s) / 2, y), c)
 
 
 func _bar(r: Rect2, v: float, c: Color) -> void:
@@ -189,24 +333,33 @@ func _frame(r: Rect2, edge: Color, fill: Color) -> void:
 	draw_rect(r.grow(-1), fill)
 
 
+func _button(r: Rect2, label: String, hot: bool, enabled: bool = true) -> void:
+	_frame(r, C_GOLD if hot and enabled else C_EDGE, C_SLOT if enabled else Color("221f30"))
+	_txt(label, Vector2(r.get_center().x - Art.text_width(label) / 2.0, r.position.y + (r.size.y - 5) / 2.0), C_TEXT if enabled else C_DIM)
+
+
 ## Draws a texture scaled by an integer factor to fit inside box (centred).
-func _icon(name_: String, box: Rect2, max_scale: int = 1) -> void:
+func _icon(name_: String, box: Rect2, max_scale: int = 1, mod: Color = Color.WHITE) -> void:
 	var tx := Art.tex(name_)
 	var w := tx.get_width()
 	var h := tx.get_height()
 	var s := maxi(1, mini(max_scale, mini(int(box.size.x) / maxi(w, 1), int(box.size.y) / maxi(h, 1))))
 	if w * s > box.size.x or h * s > box.size.y:
 		var f := minf(box.size.x / w, box.size.y / h)
-		draw_texture_rect(tx, Rect2(box.get_center() - Vector2(w, h) * f * 0.5, Vector2(w, h) * f).abs(), false)
+		draw_texture_rect(tx, Rect2(box.get_center() - Vector2(w, h) * f * 0.5, Vector2(w, h) * f).abs(), false, mod)
 		return
 	var sz := Vector2(w * s, h * s)
-	draw_texture_rect(tx, Rect2((box.get_center() - sz * 0.5).floor(), sz), false)
+	draw_texture_rect(tx, Rect2((box.get_center() - sz * 0.5).floor(), sz), false, mod)
 
 
 func _draw() -> void:
 	_draw_world_overlays()
-	if open_card != "":
+	if panel_open:
+		_draw_farmer_panel()
+	if open_id != "":
 		_draw_modal()
+	if settings_open:
+		_draw_settings()
 	_draw_top()
 	_draw_status()
 	_draw_tray()
@@ -219,7 +372,7 @@ func _draw_world_overlays() -> void:
 	if f and f.bubble_t > 0.0 and f.bubble != "":
 		var anchor := f.pos
 		if f.hidden:
-			anchor = Vector2(16, 6)
+			anchor = world.house_px() + Vector2(16, 6)
 		_bubble(f.bubble, anchor + Vector2(0, FARM_Y - 18))
 	for a in world.animals:
 		if a.bubble_t > 0.0 and not a.dead:
@@ -255,38 +408,41 @@ func _bubble(text: String, bottom_center: Vector2) -> void:
 
 # ---------------------------------------------------------------- modal
 func _draw_modal() -> void:
-	var c: Dictionary = cards.card(open_card)
+	var c: Dictionary = cards.card(open_id)
 	if c.is_empty():
-		open_card = ""
+		_close_modal()
 		return
+	var y := MODAL.position.y
 	var rar := int(c.get("rarity", 1))
 	var rc: Color = cards.RARITY_COLORS.get(rar, C_EDGE)
-	draw_rect(Rect2(0, FARM_Y, 192, STATUS_Y - FARM_Y), Color(0.05, 0.05, 0.1, 0.55))
+	draw_rect(Rect2(0, FARM_Y, 192, STATUS_Y - FARM_Y), Color(0.05, 0.05, 0.1, 0.45))
 	_frame(MODAL.grow(1), C_BG, C_BG)
 	_frame(MODAL, rc, C_PANEL)
-	# rarity + count
 	_txt(cards.RARITY_NAMES.get(rar, "").to_upper(), MODAL.position + Vector2(4, 3), rc)
-	var idx := Game.hand.find(open_card) + 1
-	var cnt := "%d/%d" % [idx, Game.hand.size()]
-	_txt(cnt, Vector2(MODAL.end.x - Art.text_width(cnt) - 4, MODAL.position.y + 3), C_DIM)
-	# title
+	var where := "IN THE BOX" if open_where == "box" else "STASHED"
+	_txt(where, Vector2(MODAL.end.x - Art.text_width(where) - 4, y + 3), C_DIM)
 	var title: String = c["title"]
-	_txt(title, Vector2(96 - Art.text_width(title) / 2, MODAL.position.y + 11), C_GOLD)
-	# portrait
-	var pr := Rect2(80, MODAL.position.y + 19, 32, 32)
+	_ctxt(title, y + 11, C_GOLD)
+	var pr := Rect2(80, y + 19, 32, 32)
 	_frame(pr.grow(1), rc.darkened(0.3), C_BG)
 	var bob := sin(t * 2.0) * 0.6 if c.get("visitor", false) else 0.0
 	_icon(c["art"], Rect2(pr.position + Vector2(0, bob), pr.size), 2)
-	# flavour text
 	var lines := Art.wrap(c["text"], 43)
 	for i in mini(5, lines.size()):
-		_txt(lines[i], Vector2(10, MODAL.position.y + 55 + i * 6), C_TEXT)
-	_draw_choice(c, "a", BOX_A)
-	_draw_choice(c, "b", BOX_B)
-	# later button
-	var hl := hover_btn == "later"
-	_frame(LATER, C_GOLD if hl else C_EDGE, C_SLOT)
-	_txt("LATER", LATER.position + Vector2(16, 4), C_TEXT)
+		_txt(lines[i], Vector2(10, y + 55 + i * 6), C_TEXT)
+	var mr := _modal_rects()
+	_draw_choice(c, "a", mr["a"])
+	_draw_choice(c, "b", mr["b"])
+	_button(mr["later"], "LATER", hover_btn == "later")
+	var other: Array = Game.stash if open_where == "box" else Game.box
+	_button(mr["move"], "STASH IT" if open_where == "box" else "TO BOX", hover_btn == "move", other.has(""))
+	var hint := ""
+	if open_where == "box":
+		var left := Game.BOX_SIZE - open_i
+		hint = "FALLS OUT OF THE BOX IN %d CARD%s" % [left, "" if left == 1 else "S"]
+	else:
+		hint = "SAFE IN THE STASH"
+	_ctxt(hint, y + 245, C_RED if open_where == "box" and open_i == Game.BOX_SIZE - 1 else C_DIM)
 
 
 func _draw_choice(c: Dictionary, which: String, box: Rect2) -> void:
@@ -315,6 +471,94 @@ func _draw_choice(c: Dictionary, which: String, box: Rect2) -> void:
 		y += 6
 
 
+# ---------------------------------------------------------------- panels
+func _draw_settings() -> void:
+	draw_rect(Rect2(0, FARM_Y, 192, STATUS_Y - FARM_Y), Color(0.05, 0.05, 0.1, 0.55))
+	_frame(PANEL.grow(1), C_BG, C_BG)
+	_frame(PANEL, C_EDGE, C_PANEL)
+	var y := PANEL.position.y
+	var r := _settings_rects()
+	_ctxt("SETTINGS", y + 6, C_GOLD)
+	_txt("NEW CARD EVERY", Vector2(12, y + 33), C_TEXT)
+	var mins := int(Game.settings.get("card_minutes", Game.DEFAULT_CARD_MINUTES))
+	_button(r["min_down"], "<", hover_btn == "min_down")
+	_button(r["min_up"], ">", hover_btn == "min_up")
+	var ms := "%d MIN" % mins
+	_txt(ms, Vector2(141 - Art.text_width(ms) / 2.0, y + 33), C_GOLD)
+	_txt("WINDOW SIDE", Vector2(12, y + 55), C_TEXT)
+	_button(r["dock_side"], Game.settings.get("dock", "right").to_upper(), hover_btn == "dock_side")
+	_txt("NEXT CARD", Vector2(12, y + 77), C_TEXT)
+	_button(r["next_now"], "NOW (DEBUG)" if OS.is_debug_build() else "SKIP WAIT", hover_btn == "next_now", OS.is_debug_build())
+	var notes := [
+		"A NEW CARD SLIDES INTO THE BOX",
+		"EVERY FEW MINUTES OF REAL TIME.",
+		"THE BOX HOLDS 3: THE OLDEST CARD",
+		"FALLS OUT WHEN A NEW ONE ARRIVES.",
+		"",
+		"DRAG CARDS INTO THE STASH TO KEEP",
+		"THEM SAFE UNTIL YOU CAN PLAY THEM.",
+	]
+	for i in notes.size():
+		_txt(notes[i], Vector2(12, y + 100 + i * 9), C_DIM)
+	_button(r["done"], "DONE", hover_btn == "done")
+
+
+func _draw_farmer_panel() -> void:
+	_frame(PANEL.grow(1), C_BG, C_BG)
+	_frame(PANEL, C_GOLD.darkened(0.3), C_PANEL)
+	var x := PANEL.position.x + 6
+	var y := PANEL.position.y + 5
+	_txt(Game.farm_name.to_upper() if Game.farm_name != "" else "THE FARM", Vector2(x, y), C_GOLD)
+	y += 8
+	if Game.QUIRKS.has(Game.quirk):
+		_txt("FARMER: " + String(Game.QUIRKS[Game.quirk]["name"]).to_upper(), Vector2(x, y), C_TEXT)
+		y += 7
+		_txt(String(Game.QUIRKS[Game.quirk]["desc"]), Vector2(x, y), C_DIM)
+		y += 9
+	var cleared := int(world.cleared_ratio() * 100.0)
+	_txt("CLEARED %d%%  FIELDS %d  PATHS %d" % [cleared, world.fields.size(), world.path_count()], Vector2(x, y), C_TEXT)
+	y += 7
+	_txt("WOOD %d  STONE %d  ORE %d" % [Game.item_count("wood"), Game.item_count("stone"), Game.item_count("ore")], Vector2(x, y), C_WOOD)
+	y += 10
+	_txt("ABILITIES", Vector2(x, y), C_GREEN)
+	y += 7
+	if Game.perks.is_empty():
+		_txt("NONE YET - CARDS CAN TEACH HIM", Vector2(x, y), C_DIM)
+		y += 7
+	for id in Game.perks:
+		if y > PANEL.end.y - 40:
+			break
+		_txt(String(Game.PERKS[id]["name"]).to_upper() + ": " + String(Game.PERKS[id]["desc"]), Vector2(x, y), C_TEXT)
+		y += 7
+	y += 3
+	_txt("FRIENDS", Vector2(x, y), C_GOLD)
+	y += 7
+	if Game.friends.is_empty():
+		_txt("NOBODY VISITS... YET", Vector2(x, y), C_DIM)
+		y += 7
+	else:
+		var fx := x
+		for id in Game.friends:
+			draw_texture(Art.tex(Game.FRIENDS[id]["icon"]), Vector2(fx, y))
+			fx += 9
+		y += 9
+	y += 3
+	_txt("RELICS", Vector2(x, y), C_PURPLE)
+	if Game.totems > 0:
+		_txt("TOTEMS %d/%d" % [Game.totems, Game.TOTEMS_MAX], Vector2(PANEL.end.x - 50, y), C_PURPLE)
+	y += 7
+	if Game.relics.is_empty():
+		_txt("NONE", Vector2(x, y), C_DIM)
+	else:
+		var rx := x
+		for id in Game.relics:
+			if rx > PANEL.end.x - 10:
+				break
+			draw_texture(Art.tex(Game.RELICS[id]["icon"]), Vector2(rx, y))
+			rx += 9
+	_txt("CLICK THE FARM TO CLOSE", Vector2(x, PANEL.end.y - 9), C_DIM)
+
+
 # ---------------------------------------------------------------- bars
 func _draw_top() -> void:
 	draw_rect(Rect2(2, 0, 188, 1), C_BG)
@@ -326,14 +570,17 @@ func _draw_top() -> void:
 	var lv_x := 12 + Art.text_width(str(Game.coins)) + 5
 	_txt("LV%d" % Game.level(), Vector2(lv_x, 3), C_GREEN)
 	_bar(Rect2(lv_x, 9, 15, 3), Game.level_progress(), C_GREEN)
-	_txt("DAY %d" % Game.day, Vector2(76, 3))
-	_txt(Game.clock_text(), Vector2(76, 9), C_DIM)
+	_txt("DAY %d" % Game.day, Vector2(70, 3))
+	_txt(Game.clock_text(), Vector2(70, 9), C_DIM)
 	var wicon: String = "ic_moon" if Game.is_night() and Game.weather in ["sunny", "heat"] else {
 		"sunny": "ic_sun", "cloudy": "ic_cloud", "rain": "ic_rain", "storm": "ic_storm", "heat": "ic_heat"}[Game.weather]
-	draw_texture(Art.tex(wicon), Vector2(116, 0))
-	for k in ["menu", "dock", "min", "close"]:
+	draw_texture(Art.tex(wicon), Vector2(106, 0))
+	for k in btns:
 		var r: Rect2 = btns[k]
-		draw_rect(r, C_EDGE if hover_btn == k else C_SLOT)
+		draw_rect(r, C_EDGE if hover_btn == k or (k == "gear" and settings_open) else C_SLOT)
+		if k == "gear":
+			draw_texture(Art.tex("gear"), r.position + Vector2(1, 1))
+			continue
 		var glyph: String = {"menu": "=", "dock": "<" if Game.settings.get("dock", "right") == "right" else ">", "min": "_", "close": "X"}[k]
 		Art.draw_text(self, glyph, r.position + Vector2(3, 2), C_RED if k == "close" and hover_btn == k else C_TEXT)
 
@@ -343,15 +590,17 @@ func _draw_status() -> void:
 	draw_rect(Rect2(0, STATUS_Y, 192, 1), C_EDGE)
 	var y := STATUS_Y + 3
 	draw_texture(Art.tex("heart"), Vector2(3, y))
-	_bar(Rect2(12, y + 1, 32, 5), Game.health / 100.0, C_RED if Game.poison <= 0.0 else Color("38b764"))
-	draw_texture(Art.tex("bolt"), Vector2(48, y))
-	_bar(Rect2(56, y + 1, 32, 5), Game.energy / 100.0, C_GOLD)
+	_bar(Rect2(12, y + 1, 26, 5), Game.health / 100.0, C_RED if Game.poison <= 0.0 else Color("38b764"))
+	draw_texture(Art.tex("bolt"), Vector2(41, y))
+	_bar(Rect2(49, y + 1, 26, 5), Game.energy / 100.0, C_GOLD)
 	var face := "face_happy" if Game.mood > 65.0 else ("face_ok" if Game.mood > 35.0 else "face_sad")
-	draw_texture(Art.tex(face), Vector2(92, y))
-	draw_texture(Art.tex("eye"), Vector2(102, y), Color.WHITE.lerp(C_PURPLE, clampf(Game.weird / 60.0, 0.0, 1.0)))
-	_txt(str(int(Game.weird)), Vector2(110, y + 1), C_PURPLE if Game.weird >= 10.0 else C_DIM)
-	var x := 110 + Art.text_width(str(int(Game.weird))) + 3
+	draw_texture(Art.tex(face), Vector2(79, y))
+	draw_texture(Art.tex("eye"), Vector2(89, y), Color.WHITE.lerp(C_PURPLE, clampf(Game.weird / 60.0, 0.0, 1.0)))
+	_txt(str(int(Game.weird)), Vector2(97, y + 1), C_PURPLE if Game.weird >= 10.0 else C_DIM)
+	var x := 97 + Art.text_width(str(int(Game.weird))) + 3
 	var icons: Array = []
+	if Game.totems > 0:
+		icons.append(["r_totem", "%d" % Game.totems])
 	if Game.buff("sun"):
 		icons.append(["sunny", ""])
 	if Game.buff("growth"):
@@ -365,17 +614,37 @@ func _draw_status() -> void:
 	if Game.inventory_count() > 0:
 		icons.append(["basket", str(Game.inventory_count())])
 	for ic in icons:
-		if x > 184:
+		if x > 150:
 			break
 		draw_texture(Art.tex(ic[0]), Vector2(x, y))
 		x += 8
 		if ic[1] != "":
 			_txt(ic[1], Vector2(x, y + 1), C_TEXT)
 			x += Art.text_width(ic[1]) + 2
+	# building materials, right-aligned: a little plank and a little stone
+	var mats := "%d" % Game.item_count("stone")
+	var mx := 189 - Art.text_width(mats)
+	_txt(mats, Vector2(mx, y + 1), C_DIM)
+	draw_rect(Rect2(mx - 6, y + 2, 4, 3), Color("94b0c2"))
+	draw_rect(Rect2(mx - 6, y + 4, 4, 1), Color("566c86"))
+	var wd := "%d" % Game.item_count("wood")
+	var wx := mx - 9 - Art.text_width(wd)
+	_txt(wd, Vector2(wx, y + 1), C_WOOD)
+	draw_rect(Rect2(wx - 7, y + 2, 5, 2), C_WOOD)
+	draw_rect(Rect2(wx - 7, y + 4, 5, 1), Color("8b5a3c"))
 	var act := "> " + (world.farmer.activity if world and world.farmer else "")
-	_txt(act.substr(0, 46), Vector2(3, STATUS_Y + 12), C_TEXT)
+	_txt(act.substr(0, 46), Vector2(3, STATUS_Y + 11), C_TEXT)
+	# bottom line: hovered card, else the latest log line
+	var hs: Array = hover_slot
+	if not hs.is_empty() and Game.card_at(hs[0], hs[1]) != "" and open_id == "":
+		var c2: Dictionary = cards.card(Game.card_at(hs[0], hs[1]))
+		var rar := int(c2.get("rarity", 1))
+		_txt(String(c2.get("title", "")).substr(0, 30), Vector2(3, STATUS_Y + 18), C_GOLD)
+		var rn: String = String(cards.RARITY_NAMES.get(rar, "")).to_upper()
+		_txt(rn, Vector2(189 - Art.text_width(rn), STATUS_Y + 18), cards.RARITY_COLORS.get(rar, C_DIM))
+		return
 	var last: String = Game.log_lines[Game.log_lines.size() - 1] if Game.log_lines.size() > 0 else "Welcome to the farm!"
-	_txt(last.substr(0, 46), Vector2(3, STATUS_Y + 20), C_DIM.lerp(C_GOLD, log_flash))
+	_txt(last.substr(0, 46), Vector2(3, STATUS_Y + 18), C_DIM.lerp(C_GOLD, log_flash))
 
 
 func _draw_tray() -> void:
@@ -384,60 +653,63 @@ func _draw_tray() -> void:
 	draw_rect(Rect2(1, bottom - 2, 190, 1), C_BG)
 	draw_rect(Rect2(2, bottom - 1, 188, 1), C_BG)
 	draw_rect(Rect2(0, TRAY_Y, 192, 1), C_EDGE)
-	var n := Game.hand.size()
-	_txt("CARDS %d/%d" % [n, Game.HAND_CAP], Vector2(4, TRAY_Y + 4), C_GOLD)
-	if n < Game.HAND_CAP:
-		var left := int(maxf(0.0, Game.next_card_in - Game.card_timer))
-		var s := "NEXT %d:%02d" % [left / 60, left % 60]
-		_txt(s, Vector2(188 - Art.text_width(s), TRAY_Y + 4), C_DIM)
-	else:
-		_txt("FULL!", Vector2(168, TRAY_Y + 4), C_RED)
-	for i in COLS * ROWS:
-		var r := _slot_rect(i)
-		if i >= n:
-			draw_rect(r, Color(1, 1, 1, 0.03))
-			continue
-		var id: String = Game.hand[i]
-		var c: Dictionary = cards.card(id)
-		var rc: Color = cards.RARITY_COLORS.get(int(c.get("rarity", 1)), C_EDGE)
-		var hov := id == hover_card or id == open_card
-		var pl: float = pulse.get(id, 0.0)
-		var edge := rc
-		if hov:
-			edge = C_GOLD
-		elif pl > 0.0 and int(pl * 6.0) % 2 == 0:
-			edge = C_TEXT
-		_frame(r, edge, C_SLOT if not hov else Color("4a5480"))
-		# little "playable" pip: green if at least one choice is available
-		var any_ok: bool = cards.can_choose(c, "a") or cards.can_choose(c, "b")
-		draw_rect(Rect2(r.end.x - 4, r.position.y + 2, 2, 2), C_GREEN if any_ok else C_RED)
-		_icon(c.get("art", ""), Rect2(r.position + Vector2(2, 2 + (-1 if hov else 0)), Vector2(SLOT_W - 4, SLOT_H - 4)), 1)
-	# bottom: hovered card name, or the relic shelf
-	if hover_relic != "" and Game.relics.has(hover_relic):
-		var rl: Dictionary = Game.RELICS[hover_relic]
-		_txt(rl["name"], Vector2(4, 416), C_PURPLE)
-		_txt(String(rl["desc"]).substr(0, 46), Vector2(4, 423), C_TEXT)
+	_txt("STASH", Vector2(4, TRAY_Y + 3), C_GREEN)
+	_txt("BOX", Vector2(100, TRAY_Y + 3), C_GOLD)
+	var left := int(Game.next_card_left())
+	var s := "%d:%02d" % [left / 60, left % 60]
+	_txt(s, Vector2(188 - Art.text_width(s), TRAY_Y + 3), C_DIM if left > 10 else C_GOLD)
+	# divider + "new cards come in here" arrow
+	draw_rect(Rect2(95, TRAY_Y + 3, 1, 33), C_EDGE)
+	var ax := 96.0 + fmod(t * 4.0, 3.0)
+	_txt(">", Vector2(ax, SLOT_Y + 11), C_GOLD.darkened(0.3))
+	for w in ["stash", "box"]:
+		for i in 3:
+			_draw_slot(w, i)
+	# a trashed card sliding off the right edge
+	if not trash_anim.is_empty():
+		var k: float = trash_anim["t"]
+		var r := _slot_rect("box", 2)
+		r.position += Vector2(k * 40.0, k * k * 30.0)
+		var c: Dictionary = cards.card(trash_anim["id"])
+		var a := clampf(1.0 - k, 0.0, 1.0)
+		_frame(r, Color(C_RED, a), Color(C_SLOT, a))
+		_icon(c.get("art", ""), Rect2(r.position + Vector2(2, 2), r.size - Vector2(4, 4)), 1, Color(1, 1, 1, a))
+	# the card being dragged
+	if card_drag and not press_slot.is_empty():
+		var id := Game.card_at(press_slot[0], press_slot[1])
+		if id != "":
+			var r2 := Rect2(mouse - Vector2(SLOT_W, SLOT_H) * 0.5, Vector2(SLOT_W, SLOT_H))
+			_frame(r2, C_GOLD, Color("4a5480"))
+			_icon(cards.card(id).get("art", ""), Rect2(r2.position + Vector2(2, 2), r2.size - Vector2(4, 4)), 1)
+
+
+func _draw_slot(where: String, i: int) -> void:
+	var r := _slot_rect(where, i)
+	var id := Game.card_at(where, i)
+	var hov: bool = hover_slot == [where, i]
+	var dragged: bool = card_drag and press_slot == [where, i]
+	if id == "" or dragged:
+		_frame(r, Color(1, 1, 1, 0.12) if not (card_drag and hov) else C_GOLD, Color(1, 1, 1, 0.03))
+		if where == "box" and i == Game.BOX_SIZE - 1 and id == "":
+			_txt("X", r.get_center() - Vector2(1, 2), Color(1, 1, 1, 0.08))
 		return
-	if hover_card != "":
-		var c2: Dictionary = cards.card(hover_card)
-		_txt(c2["title"], Vector2(4, 416), C_GOLD)
-		_txt(cards.RARITY_NAMES.get(int(c2.get("rarity", 1)), "").to_upper(), Vector2(4, 423), cards.RARITY_COLORS.get(int(c2.get("rarity", 1)), C_DIM))
-	elif Game.relics.size() > 0:
-		var x := 4
-		for id in Game.relics:
-			if x > 135:
-				break
-			draw_texture(Art.tex(Game.RELICS[id]["icon"]), Vector2(x, 417))
-			x += 9
-		_txt("RELICS", Vector2(4, 425), C_PURPLE)
-	elif n == 0:
-		_txt("CARDS TRICKLE IN OVER TIME.", Vector2(4, 417), C_DIM)
-		_txt("SAVE THEM UP!", Vector2(4, 424), C_DIM)
-	else:
-		_txt("CLICK A CARD TO DECIDE,", Vector2(4, 417), C_DIM)
-		_txt("OR GO THROUGH THEM ALL ->", Vector2(4, 424), C_DIM)
-	if n > 0:
-		var r2: Rect2 = btns["openall"]
-		var hov2 := hover_btn == "openall"
-		_frame(r2, C_GOLD if hov2 else Color("ef7d57"), Color("b13e53") if not hov2 else Color("ef7d57"))
-		_txt("OPEN ALL", r2.position + Vector2(7, 4), C_TEXT)
+	var c: Dictionary = cards.card(id)
+	var rc: Color = cards.RARITY_COLORS.get(int(c.get("rarity", 1)), C_EDGE)
+	var is_open := id == open_id
+	var pl: float = pulse.get(id, 0.0)
+	var edge := rc
+	if hov or is_open:
+		edge = C_GOLD
+	elif pl > 0.0 and int(pl * 6.0) % 2 == 0:
+		edge = C_TEXT
+	var off := Vector2.ZERO
+	if pl > 1.5 and where == "box":
+		off.x = -(pl - 1.5) * 40.0   # slides in from the left
+	var rr := Rect2(r.position + off, r.size)
+	_frame(rr, edge, C_SLOT if not (hov or is_open) else Color("4a5480"))
+	# the far-right box card is about to fall out: a red warning edge
+	if where == "box" and i == Game.BOX_SIZE - 1 and int(t * 2.0) % 2 == 0:
+		draw_rect(Rect2(rr.position.x, rr.end.y - 1, rr.size.x, 1), C_RED)
+	var any_ok: bool = cards.can_choose(c, "a") or cards.can_choose(c, "b")
+	draw_rect(Rect2(rr.end.x - 4, rr.position.y + 2, 2, 2), C_GREEN if any_ok else C_RED)
+	_icon(c.get("art", ""), Rect2(rr.position + Vector2(2, 2 + (-1 if hov else 0)), Vector2(SLOT_W - 4, SLOT_H - 4)), 1)

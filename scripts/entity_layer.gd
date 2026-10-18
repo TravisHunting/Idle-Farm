@@ -8,7 +8,7 @@ func _draw() -> void:
 	if world == null:
 		return
 	var items: Array = []  # [sort_y, kind, ref]
-	items.append([31.0, "house", null])
+	items.append([world.house.y * 16 + 31.0, "house", null])
 	for c in world.objs:
 		items.append([c.y * 16 + 15.0, "obj", c])
 	if world.farmer:
@@ -22,7 +22,7 @@ func _draw() -> void:
 	for it in items:
 		match it[1]:
 			"house":
-				draw_texture(Art.tex("house"), Vector2(0, 0))
+				draw_texture(Art.tex("house"), world.house_px())
 			"obj":
 				_draw_obj(it[2])
 			"farmer", "animal":
@@ -42,7 +42,40 @@ func _draw_obj(c: Vector2i) -> void:
 	var mod := Color.WHITE
 	if Game.STRUCTS.has(t) and o["hp"] < Game.STRUCTS[t]["hp"] * 0.5:
 		mod = Color(1.0, 0.75, 0.7)
+	if t == "fence":
+		_draw_fence(c, mod)
+		return
+	if t == "totem":
+		mod = mod.lerp(Color(1.0, 0.7, 1.0), 0.5 + 0.5 * sin(world._anim_t * 2.0 + c.x))
 	_draw_sprite(c, _tex_name(o), mod)
+
+
+## Fences join up with their neighbours: a post per tile, rails towards adjacent fences.
+func _draw_fence(c: Vector2i, mod: Color) -> void:
+	var x := c.x * 16
+	var y := c.y * 16
+	var wood := Color("c28a5a") * mod
+	var dark := Color("8b5a3c") * mod
+	var right := world.obj_type(c + Vector2i(1, 0)) == "fence"
+	var left := world.obj_type(c + Vector2i(-1, 0)) == "fence"
+	var down := world.obj_type(c + Vector2i(0, 1)) == "fence"
+	var up := world.obj_type(c + Vector2i(0, -1)) == "fence"
+	if left:
+		draw_rect(Rect2(x, y + 7, 8, 1), wood)
+		draw_rect(Rect2(x, y + 10, 8, 1), wood)
+	if right:
+		draw_rect(Rect2(x + 8, y + 7, 8, 1), wood)
+		draw_rect(Rect2(x + 8, y + 10, 8, 1), wood)
+	if up:
+		draw_rect(Rect2(x + 7, y - 2, 1, 9), dark)
+	if down:
+		draw_rect(Rect2(x + 7, y + 12, 1, 6), dark)
+	if not (left or right or up or down):
+		draw_rect(Rect2(x + 3, y + 8, 10, 1), wood)
+	# the post
+	draw_rect(Rect2(x + 6, y + 5, 3, 9), wood)
+	draw_rect(Rect2(x + 6, y + 5, 3, 1), Color("e0c08a") * mod)
+	draw_rect(Rect2(x + 8, y + 6, 1, 8), dark)
 
 
 func _tex_name(o: Dictionary) -> String:

@@ -7,7 +7,7 @@ class_name Farmer
 ##   fainted                 = health hit 0; costs a doctor's bill
 ## Stats (health/energy/mood/poison) live in Game so they persist.
 
-const SPEED := 22.0
+const SPEED := 26.0
 
 const LINES := {
 	"morning": ["Good morning, farm!", "Rise and shine!", "Another beautiful day!"],
@@ -37,6 +37,12 @@ const LINES := {
 		"Did you hear a crow?", "Thanks for the help!"],
 	"chop": ["Timber!", "Good wood."],
 	"rest": ["Ahh, a little sit-down.", "Just resting my eyes."],
+	"plan_silly": ["I'll plant a %s! Trust me.", "A %s-shaped field. Genius.", "Ooh, what about a %s?"],
+	"plan": ["New field goes here.", "Right. A %s. Sensible.", "Let's mark out a field."],
+	"pave": ["A path! Fancy.", "No more muddy boots.", "Stone by stone."],
+	"fence": ["Good fences, good crops.", "Keep those rabbits out!", "A fence. For the vibes."],
+	"thorns": ["Ow! Thorns!", "Brambles bite back!"],
+	"overgrown": ["So... much... grass.", "Grandpa really let this go.", "I can't even see the soil!"],
 }
 
 var world  # World
@@ -82,6 +88,10 @@ func say_line(kind: String, chance: float = 1.0) -> void:
 
 func speed_mult() -> float:
 	var m := lerpf(0.75, 1.2, Game.mood / 100.0)
+	if Game.has_perk("quick_feet"):
+		m *= 1.35
+	if world.is_path(cell()):
+		m *= 1.25
 	if Game.energy < 15.0:
 		m *= 0.6
 	if Game.poison > 0.0:
@@ -151,22 +161,25 @@ func update(d: float) -> void:
 
 func _update_stats(d: float) -> void:
 	var heat := Game.weather == "heat"
+	var rest := 2.0 if Game.has_perk("early_bird") else 1.0
 	match state:
 		"sleep":
-			Game.energy += 3.0 * d
+			Game.energy += 3.0 * d * rest
 			Game.health += 0.8 * d
 		"inside":
-			Game.energy += 1.2 * d
+			Game.energy += 1.2 * d * rest
 			Game.health += 0.3 * d
 		"rest":
-			Game.energy += 2.5 * d
+			Game.energy += 2.5 * d * rest
 			Game.health += 0.25 * d
 		"nap":
-			Game.energy += 2.0 * d
+			Game.energy += 2.0 * d * rest
 		"work":
 			Game.energy -= 0.45 * d * (1.8 if heat else 1.0)
 		"walk":
 			Game.energy -= 0.06 * d * (1.8 if heat else 1.0)
+	if Game.has_perk("iron_gut"):
+		Game.poison = 0.0
 	if Game.poison > 0.0:
 		Game.poison -= d
 		Game.health -= 1.0 * d
@@ -218,6 +231,8 @@ func hurt(amount: int, reason: String) -> void:
 		world.float_text("BLOCKED!", pos + Vector2(-14, -26), Color("a7f070"))
 		Game.add_log("Lucky Charm blocked %s!" % reason)
 		return
+	if Game.has_perk("tough"):
+		amount = maxi(1, amount / 2)
 	Game.health -= amount
 	Game.mood = maxf(0.0, Game.mood - amount * 0.4)
 	hurt_t = 0.6
@@ -244,7 +259,7 @@ func faint() -> void:
 
 
 func _recover() -> void:
-	var bill := int(Game.coins * 0.3)
+	var bill := 0 if Game.friends.has("doc") else int(Game.coins * 0.3)
 	Game.add_coins(-bill)
 	Game.health = 45.0
 	Game.energy = maxf(Game.energy, 50.0)
@@ -253,7 +268,7 @@ func _recover() -> void:
 	pos = world.feet(world.DOOR)
 	state = "idle"
 	think_t = 1.0
-	say("Doc patched me up... -%d coins." % bill, 4.0)
+	say("Doc patched me up... -%d coins." % bill if bill > 0 else "Doc Hollis patched me up. Free!", 4.0)
 	Game.add_log("Doctor's bill: -%d coins." % bill)
 
 
@@ -361,45 +376,85 @@ func _choose() -> void:
 		if not world.crops.has(c) and not world.objs.has(c):
 			empty.append(c)
 	if empty.size() > 0:
-		var crop := _pick_crop()
+		var pc: Vector2i = world.nearest(empty, me)
+		var crop := _pick_crop(pc)
 		if crop != "":
-			cands.append([58, {"kind": "plant", "cell": world.nearest(empty, me), "crop": crop, "dur": 1.2, "tool": "tool_seeds"}])
+			cands.append([58, {"kind": "plant", "cell": pc, "crop": crop, "dur": 1.2, "tool": "tool_seeds"}])
 
-	var ore: Array = world.cells_with_obj(["ore"])
+	var reach: Dictionary = world.reachable_from(me)
+	var ore: Array = []
+	for c in world.cells_with_obj(["ore"]):
+		if _can_reach(c, reach):
+			ore.append(c)
 	if ore.size() > 0:
 		cands.append([60, {"kind": "mine", "cell": world.nearest(ore, me), "adj": true, "dur": 3.0, "tool": "tool_hammer"}])
-	var debris: Array = world.cells_with_obj(["weed", "rock", "stump", "ash"])
-	if debris.size() > 0:
-		var dc: Vector2i = world.nearest(debris, me)
-		var dt: String = world.obj_type(dc)
-		var dur := {"weed": 1.0, "rock": 2.5, "stump": 3.5, "ash": 1.0}
-		var tool := {"weed": "tool_sickle", "rock": "tool_hammer", "stump": "tool_axe", "ash": "tool_hoe"}
-		cands.append([34 + (8 if debris.size() > 10 else 0), {"kind": "clear", "cell": dc, "adj": world.is_solid(dc),
-			"dur": dur[dt], "tool": tool[dt]}])
 
-	if world.tilled_cells().size() < Game.max_tilled():
-		var tc: Variant = _pick_till_cell()
-		if tc != null:
-			cands.append([48, {"kind": "till", "cell": tc, "dur": 2.0, "tool": "tool_hoe"}])
+	# fields: plan one, clear it, till it
+	var todo: Array = world.field_todo()
+	var tillable: Array = []
+	for c in todo[0]:
+		if reach.has(c):
+			tillable.append(c)
+	var tilled_n: int = world.tilled_cells().size()
+	if tillable.size() > 0 and tilled_n < Game.max_tilled():
+		cands.append([50, {"kind": "till", "cell": world.nearest(tillable, me), "dur": 2.0, "tool": "tool_hoe"}])
+	elif todo[0].size() + todo[1].size() == 0 and tilled_n + 2 <= Game.max_tilled() and world.fields.size() < 12:
+		# a first little field matters more than tidying; after that, expanding is a whim
+		cands.append([66 if tilled_n < 6 else 46, {"kind": "plan", "cell": me, "dur": 1.5}])
+
+	# overgrowth: field tiles first, then whatever is nearest the house
+	var debris: Array = world.reachable_debris(reach)
+	if debris.size() > 0:
+		var in_field: Array = []
+		for c in debris:
+			if world.is_planned(c):
+				in_field.append(c)
+		var target: Vector2i
+		var score := 30.0
+		if in_field.size() > 0:
+			target = world.nearest(in_field, me)
+			score = 57.0
+		else:
+			target = world.nearest(debris, world.DOOR if randf() < 0.6 else me)
+			# the wilder the farm, the more he wants it gone
+			score = 34.0 + 24.0 * (1.0 - world.cleared_ratio())
+		if Game.quirk == "tidy":
+			score += 12.0
+		var tt: String = world.obj_type(target)
+		if tt in World.TREES:
+			cands.append([score - 4.0, {"kind": "chop", "cell": target, "adj": true, "dur": 4.0, "tool": "tool_axe"}])
+		else:
+			var def: Dictionary = World.CLEARABLE[tt]
+			cands.append([score, {"kind": "clear", "cell": target, "adj": world.is_solid(target),
+				"dur": def["dur"], "tool": def["tool"]}])
+
+	# paths between the house, the bin and the fields
+	if Game.item_count("stone") >= 1 or Game.has_perk("carpenter"):
+		var pv: Variant = world.next_path_cell()
+		if pv != null and reach.has(pv):
+			cands.append([56.0 + (10.0 if Game.quirk == "builder" else 0.0), {"kind": "pave", "cell": pv, "dur": 1.6, "tool": "tool_hoe"}])
 
 	var inv := Game.inventory_count()
 	var inv_value := Game.inventory_value()
-	if inv_value >= 30 or (inv_value >= 8 and (Game.is_evening() or Game.coins < 10)):
+	var sell_at := 70 if Game.quirk == "thrifty" else 30
+	if inv_value >= sell_at or (inv_value >= 8 and (Game.is_evening() or Game.coins < 10)):
 		cands.append([46 + inv * 2, {"kind": "sell", "cell": world.BIN, "adj": true, "dur": 1.5}])
 
 	# get a little field going before spending money on buildings
-	var b: Dictionary = _pick_build() if world.tilled_cells().size() >= 4 else {}
-	if not b.is_empty():
-		cands.append([30 + randf() * 25.0, b])
+	var bld: Dictionary = _pick_build() if tilled_n >= 4 else {}
+	if not bld.is_empty() and _can_reach(bld["cell"], reach):
+		var bs := 30.0 + randf() * 25.0
+		if bld["what"] == "fence":
+			bs = 55.0 + (10.0 if Game.quirk == "builder" else 0.0)
+		cands.append([bs, bld])
 
 	for c in world.objs:
 		var o: Dictionary = world.objs[c]
-		if Game.STRUCTS.has(o["type"]):
+		if Game.STRUCTS.has(o["type"]) and Game.STRUCTS[o["type"]]["level"] < 99:
 			var maxhp: int = Game.STRUCTS[o["type"]]["hp"]
-			if o["hp"] < maxhp * 0.25:
-				cands.append([40, {"kind": "demolish", "cell": c, "adj": true, "dur": 2.5, "tool": "tool_hammer"}])
-				break
-			elif o["hp"] < maxhp * 0.6 and Game.coins >= 5:
+			if not _can_reach(c, reach):
+				continue
+			if o["hp"] < maxhp * 0.6 and Game.coins >= 5:
 				cands.append([38, {"kind": "repair", "cell": c, "adj": true, "dur": 2.5, "tool": "tool_hammer"}])
 				break
 
@@ -407,22 +462,28 @@ func _choose() -> void:
 	var decor: Array = []
 	for c in world.objs:
 		var t2: String = world.objs[c]["type"]
+		if not _can_reach(c, reach):
+			continue
 		if Game.STRUCTS.has(t2) and Game.STRUCTS[t2]["movable"]:
 			movable.append(c)
-		if t2 in ["flowerbed", "sign", "bench", "fence"]:
+		if t2 in ["flowerbed", "sign", "bench"]:
 			decor.append(c)
 	if movable.size() > 0:
 		cands.append([9, {"kind": "pickup", "cell": movable.pick_random(), "adj": true, "dur": 1.5}])
 	if decor.size() > 0:
 		cands.append([3, {"kind": "demolish", "cell": decor.pick_random(), "adj": true, "dur": 2.0, "tool": "tool_hammer"}])
 
-	var trees: Array = world.cells_with_obj(["tree"])
-	if trees.size() > 2 or (trees.size() > 0 and Game.coins < 15):
-		cands.append([22 if Game.coins < 15 else 6, {"kind": "chop", "cell": world.nearest(trees, me), "adj": true, "dur": 4.0, "tool": "tool_axe"}])
+	if Game.item_count("wood") < 3 or Game.coins < 15:
+		var trees: Array = []
+		for c in world.cells_with_obj(World.TREES):
+			if _can_reach(c, reach) and not world.is_planned(c):
+				trees.append(c)
+		if trees.size() > 0:
+			cands.append([24, {"kind": "chop", "cell": world.nearest(trees, me), "adj": true, "dur": 4.0, "tool": "tool_axe"}])
 
-	var wander := Vector2i(clampi(me.x + randi_range(-3, 3), 0, world.COLS - 1), clampi(me.y + randi_range(-3, 3), 2, world.ROWS - 1))
-	if world.is_walkable(wander):
-		cands.append([12, {"kind": "wander", "cell": wander, "dur": randf_range(1.0, 3.0)}])
+	var wander := Vector2i(clampi(me.x + randi_range(-3, 3), 0, world.COLS - 1), clampi(me.y + randi_range(-3, 3), 0, world.ROWS - 1))
+	if world.is_walkable(wander) and not world.is_house(wander):
+		cands.append([26 if Game.quirk == "dreamer" else 12, {"kind": "wander", "cell": wander, "dur": randf_range(1.0, 3.0)}])
 
 	if cands.is_empty():
 		return
@@ -436,7 +497,17 @@ func _choose() -> void:
 	_start(best)
 
 
-func _pick_crop() -> String:
+func _can_reach(c: Vector2i, reach: Dictionary) -> bool:
+	if reach.has(c):
+		return true
+	for d in World.DIRS:
+		if reach.has(c + d):
+			return true
+	return false
+
+
+## What to sow on cell c: the field's plan (one crop / a silly mix / his whim), within budget.
+func _pick_crop(c: Vector2i = Vector2i(-1, -1)) -> String:
 	var opts: Array = []
 	for id in Game.CROPS:
 		if id == "melon" or not Game.crop_unlocked(id):
@@ -449,40 +520,19 @@ func _pick_crop() -> String:
 		if Game.coins < 4 and world.crops.size() < 3:
 			return "turnip"  # grandpa's spare seeds: never soft-lock
 		return ""
+	if Game.quirk == "sunny" and "sunflower" in opts and randf() < 0.6:
+		return "sunflower"
+	var fi: int = world.field_index(c)
+	if fi >= 0:
+		var plan: String = world.fields[fi]["crop"]
+		if plan == "mixed":
+			return opts.pick_random()
+		if plan in opts:
+			return plan
 	# lean towards the fanciest crop he can afford
 	if randf() < 0.55:
 		return opts[opts.size() - 1]
 	return opts.pick_random()
-
-
-func _pick_till_cell() -> Variant:
-	var tilled: Array = world.tilled_cells()
-	var cands: Array = []
-	var focus := Vector2(6, 8)
-	if tilled.size() > 0:
-		focus = Vector2.ZERO
-		for t in tilled:
-			focus += Vector2(t)
-		focus /= tilled.size()
-		for t in tilled:
-			for dd in world.DIRS:
-				var n: Vector2i = t + dd
-				if n.y >= 3 and world.is_free_grass(n):
-					cands.append(n)
-	if cands.is_empty():
-		for c in world.free_grass_cells():
-			if c.y >= 3 and c.x >= 1 and c.x <= world.COLS - 2:
-				cands.append(c)
-	if cands.is_empty():
-		return null
-	var best: Variant = null
-	var bd := 1e9
-	for c in cands:
-		var dd: float = Vector2(c).distance_to(focus) + randf() * 0.6
-		if dd < bd:
-			bd = dd
-			best = c
-	return best
 
 
 func _pick_build() -> Dictionary:
@@ -494,16 +544,20 @@ func _pick_build() -> Dictionary:
 		var def: Dictionary = Game.STRUCTS[id]
 		if def["level"] > lv or world.count_obj(id) >= def["max"]:
 			continue
-		if Game.coins < int(def["cost"]) + 8:
+		if not Game.can_afford(def) or Game.coins < int(def["cost"]) + 8:
 			continue
 		var w := 1.0
 		match id:
-			"scarecrow": w = 5.0 if crops_n > 3 else 0.5
+			"scarecrow": w = 5.0 if crops_n > 3 and world.count_obj("scarecrow") < 1 else 1.0
 			"well": w = 4.0
 			"coop": w = 3.0
 			"rod": w = 2.0
-			"fence": w = 2.0
+			"fence": w = 6.0 if world.next_fence_cell() != null else 0.0
+			"compost": w = 2.0
+			"flowerbed": w = 1.5 if world.path_count() > 4 else 0.3
 			"beehive": w = 2.0 if crops_n > 4 else 0.3
+		if w <= 0.0:
+			continue
 		opts.append(id)
 		weights.append(w)
 	if opts.is_empty():
@@ -518,60 +572,10 @@ func _pick_build() -> Dictionary:
 		if r <= 0.0:
 			pick = opts[i]
 			break
-	var c: Variant = _pick_build_cell(pick)
+	var c: Variant = world.pick_build_cell(pick)
 	if c == null:
 		return {}
-	return {"kind": "build", "what": pick, "cell": c, "adj": true, "dur": 4.0, "tool": "tool_hammer"}
-
-
-func _pick_build_cell(id: String) -> Variant:
-	var free: Array = world.free_grass_cells()
-	var cands: Array = []
-	var tilled: Array = world.tilled_cells()
-	for c in free:
-		var ok := true
-		match id:
-			"fence":
-				ok = c.x == 0 or c.x == world.COLS - 1 or c.y == world.ROWS - 1
-			"scarecrow", "beehive":
-				ok = false
-				for t in tilled:
-					if Vector2(t).distance_to(Vector2(c)) <= 2.0:
-						ok = true
-						break
-			"sign", "bench", "lamp":
-				ok = c.y <= 5
-			_:
-				ok = c.y >= 2
-		if ok:
-			cands.append(c)
-	cands.shuffle()
-	for c in cands.slice(0, 8):
-		if _keeps_connected(c):
-			return c
-	return null
-
-
-## True if putting something solid on c does not cut the farm in two.
-func _keeps_connected(c: Vector2i) -> bool:
-	var before := _reach_count(Vector2i(-99, -99))
-	var after := _reach_count(c)
-	return after >= before - 1
-
-
-func _reach_count(block: Vector2i) -> int:
-	var start: Vector2i = world.DOOR
-	var seen := {start: true}
-	var q: Array = [start]
-	while q.size() > 0:
-		var c: Vector2i = q.pop_front()
-		for dd in world.DIRS:
-			var n: Vector2i = c + dd
-			if seen.has(n) or n == block or not world.is_walkable(n):
-				continue
-			seen[n] = true
-			q.append(n)
-	return seen.size()
+	return {"kind": "build", "what": pick, "cell": c, "adj": true, "dur": 4.0 if pick != "fence" else 1.8, "tool": "tool_hammer"}
 
 
 # ---------------------------------------------------------------- doing
@@ -593,7 +597,11 @@ func _start(t: Dictionary) -> void:
 		"water": say_line("water", 0.2)
 		"harvest": say_line("harvest", 0.3)
 		"sell": say_line("sell", 0.4)
-		"build": say("Let's build a %s!" % Game.STRUCTS[t["what"]]["name"])
+		"build":
+			if t["what"] == "fence":
+				say_line("fence", 0.3)
+			else:
+				say("Let's build a %s!" % Game.STRUCTS[t["what"]]["name"])
 		"demolish": say_line("demolish", 0.7)
 		"pickup": say_line("rearrange", 0.7)
 		"clear": say_line("clear", 0.2)
@@ -603,12 +611,19 @@ func _start(t: Dictionary) -> void:
 		"shelter": say_line("storm_shelter")
 		"rest", "rest_home": say_line("rest", 0.6)
 		"chop": say_line("chop", 0.3)
+		"pave": say_line("pave", 0.2)
 
 
 func _describe(t: Dictionary) -> String:
 	var c: Vector2i = t["cell"]
 	match t["kind"]:
-		"till": return "Tilling soil"
+		"till":
+			var fi: int = world.field_index(c)
+			if fi >= 0:
+				return "Tilling the %s field" % String(world.fields[fi]["shape"]).replace("_", " ")
+			return "Tilling soil"
+		"plan": return "Planning a new field"
+		"pave": return "Laying a path"
 		"plant": return "Planting %s" % Game.CROPS[t["crop"]]["name"].to_lower()
 		"water":
 			if world.crops.has(c):
@@ -616,7 +631,7 @@ func _describe(t: Dictionary) -> String:
 			return "Watering"
 		"harvest": return "Harvesting"
 		"clear_crop": return "Clearing a dead crop"
-		"clear": return "Clearing %s" % world.obj_type(c)
+		"clear": return "Clearing %s" % _debris_name(world.obj_type(c))
 		"mine": return "Mining meteor ore"
 		"sell": return "Selling produce"
 		"build": return "Building a %s" % Game.STRUCTS[t["what"]]["name"]
@@ -633,6 +648,14 @@ func _describe(t: Dictionary) -> String:
 		"chop": return "Chopping a tree"
 		"wander": return "Strolling around"
 	return "Pondering"
+
+
+func _debris_name(t: String) -> String:
+	match t:
+		"tallgrass": return "tall grass"
+		"weed": return "weeds"
+		"bramble": return "brambles"
+	return "a " + t if t != "ash" else "ash"
 
 
 func _sname(t: String) -> String:
@@ -717,6 +740,11 @@ func _arrive() -> void:
 		_:
 			state = "work"
 			work_t = float(task.get("dur", 1.0))
+			var k: String = task["kind"]
+			if Game.has_perk("strong_arms") and k in ["clear", "chop", "mine"]:
+				work_t *= 0.5
+			if Game.has_perk("carpenter") and k in ["build", "repair", "pave"]:
+				work_t *= 0.5
 
 
 func _idle() -> void:
@@ -763,6 +791,23 @@ func _finish() -> void:
 			if world.is_free_grass(c):
 				world.set_tilled(c, true)
 				world.puff(world.center(c), Color("8b5a3c"), 8)
+		"plan":
+			var f: Dictionary = world.plan_field()
+			if not f.is_empty():
+				var shape: String = String(f["shape"]).replace("_", " ")
+				if f["shape"] in World.SILLY:
+					say(LINES["plan_silly"].pick_random().replace("%s", shape), 3.5)
+				else:
+					say(LINES["plan"].pick_random().replace("%s", shape), 3.0)
+				Game.add_log("The farmer marked out a %s-shaped field." % shape)
+				for cc in f["cells"]:
+					world.puff(world.center(cc), Color("e0c08a"), 2, 6.0)
+		"pave":
+			if world.is_free_grass(c) and (Game.item_count("stone") >= 1 or Game.has_perk("carpenter")):
+				if not Game.has_perk("carpenter"):
+					Game.add_item("stone", -1)
+				world.ground[world.idx(c)] = World.G_PATH
+				world.puff(world.center(c), Color("c9a26b"), 6)
 		"plant":
 			if world.is_tilled(c) and not world.crops.has(c) and not world.objs.has(c):
 				var crop: String = task["crop"]
@@ -777,6 +822,10 @@ func _finish() -> void:
 			if world.is_tilled(c):
 				world.wet[world.idx(c)] = 1.0
 				world.puff(world.center(c), Color("41a6f6"), 8, 14.0, 4.0)
+				if Game.has_perk("big_can"):
+					for dd in World.DIRS8:
+						if world.is_tilled(c + dd):
+							world.wet[world.idx(c + dd)] = 1.0
 		"harvest":
 			if world.crops.has(c) and world.crop_stage(world.crops[c]) == 3:
 				var type: String = world.crops[c]["type"]
@@ -797,14 +846,21 @@ func _finish() -> void:
 				world.crops.erase(c)
 		"clear":
 			var t: String = world.obj_type(c)
-			match t:
-				"rock":
-					Game.add_item("stone")
-				"stump":
-					Game.add_item("wood", 2)
-			if t in ["rock", "weed", "stump", "ash"]:
+			if World.CLEARABLE.has(t):
+				var def: Dictionary = World.CLEARABLE[t]
+				var drops: Dictionary = def["drops"]
+				for k in drops:
+					Game.add_item(k, int(drops[k]))
 				world.remove_obj(c)
-				world.puff(world.center(c), Color("94b0c2") if t == "rock" else Color("38b764"), 8)
+				world.puff(world.center(c), Color("94b0c2") if t in ["rock", "boulder"] else Color("38b764"), 8)
+				if drops.size() > 0:
+					var k0: String = drops.keys()[0]
+					world.float_text("+%d %s" % [drops[k0], k0.to_upper()], pos + Vector2(-14, -24), Color("e0c08a"))
+				if randf() < float(def.get("thorns", 0.0)):
+					say_line("thorns")
+					hurt(4, "thorny brambles")
+				if randf() < 0.03 and world.cleared_ratio() < 0.5:
+					say_line("overgrown")
 		"mine":
 			if world.obj_type(c) == "ore":
 				world.remove_obj(c)
@@ -812,28 +868,28 @@ func _finish() -> void:
 				world.float_text("+2 ORE", pos + Vector2(-12, -24), Color("73eff7"))
 				world.puff(world.center(c), Color("73eff7"), 10)
 		"chop":
-			if world.obj_type(c) == "tree":
+			if world.obj_type(c) in World.TREES:
 				world.remove_obj(c)
 				world.place_obj(c, "stump")
 				Game.add_item("wood", 4)
+				world.float_text("+4 WOOD", pos + Vector2(-14, -24), Color("e0c08a"))
 				world.puff(world.center(c) + Vector2(0, -8), Color("2a8a4a"), 14, 22.0)
 		"sell":
-			var v := Game.inventory_value()
+			var v := Game.sell_goods()
 			if v > 0:
-				Game.add_coins(v)
-				Game.inventory.clear()
 				world.float_text("+%d" % v, world.center(world.BIN) + Vector2(-6, -18))
 				Game.add_log("Sold produce for %d coins." % v)
 		"build":
 			var what: String = task["what"]
-			var cost: int = Game.STRUCTS[what]["cost"]
-			if world.is_free_grass(c) and Game.coins >= cost and _keeps_connected(c):
-				Game.add_coins(-cost)
+			var bdef: Dictionary = Game.STRUCTS[what]
+			if world.is_free_grass(c) and Game.can_afford(bdef) and (not bdef["solid"] or world.keeps_connected(c)):
+				Game.pay_for(bdef)
 				world.place_obj(c, what)
 				Game.bump("built")
 				Game.mood = minf(100.0, Game.mood + 5.0)
 				world.puff(world.center(c), Color("c28a5a"), 10)
-				Game.add_log("Built a %s." % Game.STRUCTS[what]["name"])
+				if what != "fence":
+					Game.add_log("Built a %s." % Game.STRUCTS[what]["name"])
 				if what == "coop":
 					for i in 2:
 						world.add_animal(Animal.new(world, "chicken", world.feet(c) + Vector2(randf_range(-10, 10), 10)))
@@ -857,7 +913,7 @@ func _finish() -> void:
 				carrying = o2["type"]
 				carry_data = o2
 				world.remove_obj(c)
-				var dest: Variant = _pick_build_cell(carrying)
+				var dest: Variant = world.pick_build_cell(carrying)
 				if dest == null or dest == c:
 					world.objs[c] = carry_data
 					carrying = ""
@@ -897,7 +953,7 @@ func draw(ci: CanvasItem) -> void:
 		if state == "sleep" or state == "rest":
 			var z := Art.tex("zzz")
 			var off := Vector2(fmod(anim_t * 4.0, 8.0), -fmod(anim_t * 6.0, 12.0))
-			ci.draw_texture(z, Vector2(22, 4) + off, Color(1, 1, 1, 0.8))
+			ci.draw_texture(z, world.house_px() + Vector2(22, 4) + off, Color(1, 1, 1, 0.8))
 		return
 	# shadow
 	ci.draw_rect(Rect2(pos.x - 5, pos.y, 10, 2), Color(0, 0, 0, 0.25))

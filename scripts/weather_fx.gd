@@ -3,7 +3,7 @@ extends Node2D
 ## drifting cloud shadows and the meteor streak.
 
 const W := 192
-const H := 256
+const H := 352
 
 var drops: Array = []
 var clouds: Array = []
