@@ -5,4 +5,5 @@ Update its checkboxes and Changelog whenever you finish something.
 - Godot 4.7, GDScript, GL Compatibility. Everything (scene tree, art, font) is built in code.
 - Verify changes by running through the Godot MCP (`project_run`, `logs_read source=game`,
   `editor_screenshot source=game`, `editor_manage op=game_eval` for scripted tests).
-- Debug keys in-game: F1 card, F2 +10 cards, F3 random event, F4 10x speed, F5 wipe save.
+- Debug keys in-game: F1 draw card, F2 +10 cards, F3 random event, F4 10x speed, F5 wipe slot, F6 +10 weirdness.
+- Card content lives in `scripts/deck.gd` (documented mini-language); card logic in `scripts/cards.gd`.

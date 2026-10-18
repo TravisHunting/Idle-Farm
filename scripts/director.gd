@@ -1,6 +1,7 @@
 extends Node
-## Director: the "dungeon master". Schedules random events, cycles the weather, throws
-## lightning, spreads fire, and implements every Activity card (play_card / play_all).
+## Director: the "dungeon master". Schedules random events (including weird ones that unlock
+## as Game.weird rises), cycles the weather, throws lightning, spreads fire, and implements the
+## world "actions" that choice-card effects call (do_action).
 
 signal shake(amount: float)
 
@@ -19,6 +20,7 @@ const FLAMMABLE := ["fence", "flowerbed", "bench", "sign", "scarecrow", "beehive
 
 var world: World
 var weather_fx: Node2D
+var cards: Node
 var weather_t := 90.0
 var event_t := 25.0
 var bolt_t := 6.0
@@ -27,6 +29,8 @@ var _playing_all := false
 
 
 func _process(delta: float) -> void:
+	if not Game.running:
+		return
 	var d := delta * Game.time_scale
 	weather_t -= d
 	if weather_t <= 0.0:
@@ -83,13 +87,17 @@ func set_weather(w: String, dur: float = -1.0) -> void:
 
 func lightning(force_cell: Variant = null) -> void:
 	var c: Vector2i
-	var rods: Array = world.cells_with_obj(["rod"])
+	var rods: Array = world.cells_with_obj(["rod", "obelisk"])
 	var f := world.farmer
 	if force_cell != null:
 		c = force_cell
 	elif rods.size() > 0 and randf() < 0.85:
 		c = rods[0]
-		Game.add_log("The lightning rod caught a bolt!")
+		if world.obj_type(c) == "obelisk":
+			Game.add_log("Lightning strikes the obelisk. It hums happily.")
+			Game.add_weird(0.5)
+		else:
+			Game.add_log("The lightning rod caught a bolt!")
 	elif f != null and f.visible_outside() and randf() < 0.22:
 		c = f.cell()
 	else:
@@ -98,7 +106,7 @@ func lightning(force_cell: Variant = null) -> void:
 		weather_fx.strike(world.center(c))
 	shake.emit(2.0)
 	world.puff(world.center(c), Color("ffcd75"), 12, 30.0)
-	if world.obj_type(c) == "rod":
+	if world.obj_type(c) in ["rod", "obelisk"]:
 		return
 	if f != null and f.visible_outside() and f.pos.distance_to(world.feet(c)) < 20.0:
 		f.hurt(25, "a lightning strike")
@@ -111,7 +119,7 @@ func ignite(c: Vector2i) -> void:
 	if not world.in_bounds(c) or world.is_house(c):
 		return
 	var t := world.obj_type(c)
-	if t == "fire" or t == "bin" or t == "rod" or t == "well":
+	if t in ["fire", "bin", "rod", "well", "idol", "obelisk", "stones", "saucer"]:
 		return
 	var flammable := world.crops.has(c) or t in FLAMMABLE
 	if not flammable:
@@ -170,11 +178,12 @@ func random_event(force: String = "") -> void:
 	var has_crops := world.crops.size() > 0
 	var ev := {}
 	if has_crops:
-		ev["crows"] = 10
+		if not Game.has_relic("crow_crown") and not Game.buff("crow_truce"):
+			ev["crows"] = 10
 		ev["rabbits"] = 6
-	if Game.is_evening() or Game.is_night():
-		ev["fox"] = 7
-	if lv >= 2:
+	if (Game.is_evening() or Game.is_night()) and not Game.has_relic("lantern") and Game.day >= 2:
+		ev["fox"] = 5
+	if lv >= 2 and not Game.buff("boar_guard"):
 		ev["boar"] = 3
 	if not Game.is_night():
 		ev["snake"] = 3
@@ -184,7 +193,21 @@ func random_event(force: String = "") -> void:
 	ev["weeds"] = 5
 	if Game.inventory_count() > 0:
 		ev["merchant"] = 2
-	ev["lucky"] = 1
+	ev["lucky"] = 4 if Game.has_relic("black_cat") else 1
+	# the strange stuff, unlocked by weirdness
+	var w := Game.weird
+	if w >= 10 and Game.is_night():
+		ev["wisps"] = 3
+	if w >= 15:
+		ev["knock"] = 2
+	if w >= 20 and world.crops.size() >= 3:
+		ev["crop_circle"] = 2
+	if w >= 25 and has_crops:
+		ev["mutation"] = 2
+	if w >= 30:
+		ev["whispers"] = 2
+	if w >= 35 and Game.is_night():
+		ev["abduction"] = 2
 	var pick := force
 	if pick == "":
 		var total := 0
@@ -253,6 +276,59 @@ func run_event(id: String) -> void:
 			for i in randi_range(3, 5):
 				spawn_animal("butterfly", Vector2(randf_range(10, 180), randf_range(20, 240)))
 			Game.mood = minf(100.0, Game.mood + 4.0)
+		"wisps":
+			for i in randi_range(4, 7):
+				spawn_animal("wisp", Vector2(randf_range(10, 180), randf_range(30, 240)))
+			Game.add_log("Pale wisps drift across the fields.")
+		"knock":
+			Game.add_log("Someone knocked three times. Nobody was there. A card lay on the step.")
+			cards.draw_card()
+		"crop_circle":
+			var alive: Array = []
+			for c in world.crops:
+				if not world.crops[c].get("dead", false):
+					alive.append(c)
+			alive.shuffle()
+			for i in mini(3, alive.size()):
+				world.crops[alive[i]]["growth"] = 1.0
+			Game.add_item("ore", 1)
+			Game.add_weird(2.0)
+			Game.add_log("A crop circle appeared overnight. The crops inside are ripe.")
+		"mutation":
+			for c in world.crops:
+				var cr: Dictionary = world.crops[c]
+				if not cr.get("dead", false) and cr["type"] != "glowshroom":
+					cr["type"] = "glowshroom"
+					world.puff(world.center(c), Color("73eff7"), 8)
+					Game.add_log("A crop mutated into a glowshroom!")
+					break
+		"whispers":
+			Game.mood = maxf(0.0, Game.mood - 8.0)
+			if world.farmer:
+				world.farmer.say(["The ground is talking again.", "Who keeps calling my name?", "I dreamt of the field. It was awake."].pick_random(), 4.0)
+			Game.add_log("The farmer hears whispers.")
+		"abduction":
+			var chickens: Array = []
+			for a in world.animals:
+				if a.kind == "chicken" and not a.dead and not a.hidden:
+					chickens.append(a)
+			var p := Vector2.ZERO
+			if chickens.size() > 0:
+				var ch = chickens.pick_random()
+				p = ch.pos
+				ch.dead = true
+				Game.add_log("A beam of light took a chicken. It left 2 ore behind.")
+			elif world.crops.size() > 0:
+				var c2: Vector2i = world.crops.keys().pick_random()
+				p = world.center(c2)
+				world.crops.erase(c2)
+				Game.add_log("A beam of light took a crop. It left 2 ore behind.")
+			else:
+				return
+			if weather_fx:
+				weather_fx.beam(p)
+			Game.add_item("ore", 2)
+			Game.add_weird(2.0)
 		"lucky":
 			var amt := 3 + lv * 2
 			Game.add_coins(amt)
@@ -280,10 +356,8 @@ func _spawn_dog() -> void:
 	a.say("Woof!")
 
 
-# ---------------------------------------------------------------- cards
-func play_card(id: String) -> void:
-	if not Game.take_card(id):
-		return
+# ---------------------------------------------------------------- actions (used by card effects)
+func do_action(id: String) -> void:
 	var f := world.farmer
 	var lv := Game.level()
 	match id:
@@ -440,20 +514,3 @@ func play_card(id: String) -> void:
 			Game.add_log("A tremor! %d weeds shaken loose." % weeds.size())
 			if f and f.visible_outside():
 				f.say("Whoa whoa whoa!")
-
-
-func play_all() -> void:
-	if _playing_all:
-		return
-	_playing_all = true
-	var list: Array = []
-	for id in Game.CARDS:
-		for i in int(Game.cards.get(id, 0)):
-			list.append(id)
-	# Fun order: chaos first, then the fixes.
-	var chaos := ["storm", "critters", "meteor", "quake"]
-	list.sort_custom(func(a, b): return (a in chaos) and not (b in chaos))
-	for id in list:
-		play_card(id)
-		await get_tree().create_timer(0.35).timeout
-	_playing_all = false

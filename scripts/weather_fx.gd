@@ -13,6 +13,8 @@ var bolt_t := 0.0
 var meteor_from := Vector2.ZERO
 var meteor_to := Vector2.ZERO
 var meteor_t := -1.0
+var beam_p := Vector2.ZERO
+var beam_t := 0.0
 var t := 0.0
 
 
@@ -36,6 +38,11 @@ func strike(p: Vector2) -> void:
 	bolt.append(p)
 
 
+func beam(p: Vector2) -> void:
+	beam_p = p
+	beam_t = 1.5
+
+
 func meteor(p: Vector2) -> void:
 	meteor_to = p
 	meteor_from = p + Vector2(-90, -160)
@@ -46,6 +53,7 @@ func _process(delta: float) -> void:
 	t += delta
 	flash = maxf(0.0, flash - delta * 3.0)
 	bolt_t -= delta
+	beam_t -= delta
 	if meteor_t >= 0.0:
 		meteor_t += delta / 0.6
 		if meteor_t > 1.0:
@@ -105,5 +113,12 @@ func _draw() -> void:
 			var q := meteor_from.lerp(meteor_to, maxf(0.0, meteor_t - i * 0.03))
 			draw_rect(Rect2(q.floor(), Vector2(2, 2)), Color(1, 0.6 - i * 0.05, 0.2, 1.0 - i * 0.12))
 		draw_rect(Rect2(p2.floor() - Vector2(1, 1), Vector2(4, 4)), Color("ffcd75"))
+	if beam_t > 0.0:
+		var a := minf(1.0, beam_t)
+		draw_rect(Rect2(beam_p.x - 6, 0, 12, beam_p.y + 4), Color(0.6, 1.0, 0.9, 0.25 * a))
+		draw_rect(Rect2(beam_p.x - 3, 0, 6, beam_p.y + 4), Color(0.8, 1.0, 1.0, 0.35 * a))
+		for i in 6:
+			var y := fmod(t * 60.0 + i * 37.0, beam_p.y + 4)
+			draw_rect(Rect2(beam_p.x - 4 + (i % 3) * 3, y, 1, 1), Color(1, 1, 1, a))
 	if flash > 0.0:
 		draw_rect(Rect2(0, 0, W, H), Color(1, 1, 1, flash * 0.6))

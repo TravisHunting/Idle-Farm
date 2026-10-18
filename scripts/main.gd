@@ -1,18 +1,25 @@
 extends Node
-## Entry point. Builds the scene tree in code, docks the window to the screen edge,
-## handles save/load (+ offline progress), autosave and debug keys.
+## Entry point. Shows the welcome screen (how to play + save-slot picker), then builds the
+## game tree in code for the chosen slot. Docks the window to the right (or left) side of the
+## screen, vertically centred with a little padding. Handles save/load per slot (+ offline
+## progress), autosave and debug keys.
 
 const BASE := Vector2i(192, 432)
 const FARM_RECT := Rect2(0, 16, 192, 256)
+const EDGE_PADDING := 24          # screen pixels between the window and the screen edge
+const AUTOSAVE_EVERY := 20.0
 
 var world: World
 var director: Node
+var cards: Node
 var hud: Control
 var farm_view: Control
 var weather_fx: Node2D
 var tint: CanvasModulate
+var welcome: Control
 var embedded := false
-var _autosave_t := 30.0
+var _game_root: Node
+var _autosave_t := AUTOSAVE_EVERY
 var _shake := 0.0
 
 
@@ -20,17 +27,55 @@ func _ready() -> void:
 	RenderingServer.set_default_clear_color(Color(0, 0, 0, 0))
 	get_viewport().transparent_bg = true
 	embedded = Engine.is_embedded_in_editor()
+	_setup_window()
+	show_welcome()
+
+
+# ---------------------------------------------------------------- flow
+func show_welcome(page: int = 0) -> void:
+	Game.running = false
+	var layer := CanvasLayer.new()
+	layer.layer = 5
+	layer.name = "WelcomeLayer"
+	add_child(layer)
+	welcome = preload("res://scripts/welcome.gd").new()
+	welcome.main = self
+	welcome.page = page
+	layer.add_child(welcome)
+
+
+func start_slot(n: int) -> void:
+	Game.reset()
+	Game.slot = n
 	_build()
 	if not load_game():
 		world.new_farm()
 		Game.add_log("Day 1. A fresh start on an empty farm!")
 		world.farmer.say("My very own farm!", 4.0)
-	_setup_window()
+		save_game()
+	Game.running = true
+	if welcome:
+		welcome.get_parent().queue_free()
+		welcome = null
+
+
+func back_to_menu() -> void:
+	save_game()
+	Game.running = false
+	if _game_root:
+		_game_root.queue_free()
+		_game_root = null
+	world = null
+	show_welcome(1)
 
 
 func _build() -> void:
+	_game_root = Node.new()
+	_game_root.name = "GameRoot"
+	add_child(_game_root)
+
 	tint = CanvasModulate.new()
-	add_child(tint)
+	_game_root.add_child(tint)
 
 	farm_view = Control.new()
 	farm_view.name = "FarmView"
@@ -38,7 +83,7 @@ func _build() -> void:
 	farm_view.size = FARM_RECT.size
 	farm_view.clip_contents = true
 	farm_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(farm_view)
+	_game_root.add_child(farm_view)
 
 	world = World.new()
 	world.name = "World"
@@ -63,29 +108,43 @@ func _build() -> void:
 	director.world = world
 	director.weather_fx = weather_fx
 	director.shake.connect(func(a: float) -> void: _shake = maxf(_shake, a))
-	add_child(director)
+	_game_root.add_child(director)
 	world.director = director
+
+	cards = preload("res://scripts/cards.gd").new()
+	cards.name = "Cards"
+	cards.world = world
+	cards.director = director
+	director.cards = cards
+	_game_root.add_child(cards)
 
 	var layer := CanvasLayer.new()
 	layer.layer = 1
-	add_child(layer)
+	_game_root.add_child(layer)
 	hud = preload("res://scripts/hud.gd").new()
 	hud.name = "HUD"
 	hud.world = world
 	hud.director = director
+	hud.cards = cards
 	hud.main = self
 	layer.add_child(hud)
 
 
 func _process(delta: float) -> void:
+	if world == null or not Game.running:
+		return
 	# day/night + weather tint (does not affect the HUD's CanvasLayer)
 	var night := Color(0.38, 0.42, 0.7)
+	if Game.has_relic("lantern"):
+		night = Color(0.5, 0.5, 0.72)
 	var c := Color.WHITE.lerp(night, Game.darkness())
 	match Game.weather:
 		"storm": c *= Color(0.72, 0.74, 0.85)
 		"rain": c *= Color(0.86, 0.88, 0.95)
 		"cloudy": c *= Color(0.93, 0.93, 0.96)
 		"heat": c *= Color(1.0, 0.96, 0.88)
+	# the farm takes on a faint violet cast as it gets weirder
+	c = c.lerp(c * Color(0.9, 0.82, 1.0), clampf(Game.weird / 100.0, 0.0, 1.0))
 	c.a = 1.0
 	tint.color = tint.color.lerp(c, minf(1.0, delta * 2.0))
 	if _shake > 0.0:
@@ -95,7 +154,7 @@ func _process(delta: float) -> void:
 		farm_view.position = FARM_RECT.position
 	_autosave_t -= delta
 	if _autosave_t <= 0.0:
-		_autosave_t = 30.0
+		_autosave_t = AUTOSAVE_EVERY
 		save_game()
 
 
@@ -116,18 +175,20 @@ func _apply_dock() -> void:
 	var win := get_window()
 	var screen := DisplayServer.window_get_current_screen()
 	var r := DisplayServer.screen_get_usable_rect(screen)
-	var scale := clampi(int(r.size.y / float(BASE.y)), 1, 4)
+	var scale := clampi(int((r.size.y - EDGE_PADDING * 2) / float(BASE.y)), 1, 4)
 	var sz := BASE * scale
 	win.size = sz
-	var x := r.position.x + r.size.x - sz.x
+	var x := r.position.x + r.size.x - sz.x - EDGE_PADDING
 	if Game.settings.get("dock", "right") == "left":
-		x = r.position.x
-	win.position = Vector2i(x, r.position.y + r.size.y - sz.y)
+		x = r.position.x + EDGE_PADDING
+	var y := r.position.y + (r.size.y - sz.y) / 2
+	win.position = Vector2i(x, y)
 	print("Docked %s: window %s at %s (scale %dx, usable screen %s)" % [Game.settings.get("dock", "right"), sz, win.position, scale, r])
 
 
 func toggle_dock() -> void:
 	Game.settings["dock"] = "left" if Game.settings.get("dock", "right") == "right" else "right"
+	Game.save_settings()
 	_apply_dock()
 
 
@@ -149,27 +210,50 @@ func _notification(what: int) -> void:
 
 # ---------------------------------------------------------------- save/load
 func save_game() -> void:
-	if world == null or world.farmer == null:
+	if world == null or world.farmer == null or not Game.running and _game_root == null:
 		return
-	var d := {"version": 1, "time": Time.get_unix_time_from_system(), "game": Game.to_dict(), "world": world.to_dict()}
-	var fa := FileAccess.open(Game.SAVE_PATH, FileAccess.WRITE)
+	var meta := {"day": Game.day, "level": Game.level(), "coins": Game.coins, "weird": int(Game.weird),
+		"relics": Game.relics.size(), "play_seconds": Game.play_seconds}
+	var d := {"version": 2, "time": Time.get_unix_time_from_system(), "meta": meta,
+		"game": Game.to_dict(), "world": world.to_dict()}
+	var fa := FileAccess.open(Game.slot_path(Game.slot), FileAccess.WRITE)
 	if fa:
 		fa.store_string(JSON.stringify(d))
 		fa.close()
 
 
 func load_game() -> bool:
-	if not FileAccess.file_exists(Game.SAVE_PATH):
+	var path := Game.slot_path(Game.slot)
+	if not FileAccess.file_exists(path):
 		return false
-	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(Game.SAVE_PATH))
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
 	if typeof(parsed) != TYPE_DICTIONARY:
-		push_warning("Save file unreadable, starting fresh.")
+		push_warning("Save slot %d unreadable, starting fresh." % Game.slot)
 		return false
 	var d: Dictionary = parsed
 	Game.from_dict(d.get("game", {}))
 	world.from_dict(d.get("world", {}))
 	_offline_progress(Time.get_unix_time_from_system() - float(d.get("time", 0.0)))
 	return true
+
+
+## Summary of a slot for the welcome screen ({} if empty).
+func slot_meta(n: int) -> Dictionary:
+	var path := Game.slot_path(n)
+	if not FileAccess.file_exists(path):
+		return {}
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return {"broken": true}
+	var m: Dictionary = parsed.get("meta", {})
+	m["time"] = float(parsed.get("time", 0.0))
+	return m
+
+
+func delete_slot(n: int) -> void:
+	var path := Game.slot_path(n)
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 
 func _offline_progress(seconds: float) -> void:
@@ -179,7 +263,9 @@ func _offline_progress(seconds: float) -> void:
 	var avg := (Game.CARD_INTERVAL.x + Game.CARD_INTERVAL.y) * 0.5
 	var n := 0
 	for i in int(el / avg):
-		if Game.add_card(Game.random_card()):
+		if Game.hand.size() >= Game.HAND_CAP:
+			break
+		if cards.draw_card() != "":
 			n += 1
 	for c in world.crops:
 		var cr: Dictionary = world.crops[c]
@@ -193,27 +279,32 @@ func _offline_progress(seconds: float) -> void:
 	Game.day += int(t)
 	Game.time_of_day = fmod(t, 1.0)
 	var mins := int(el / 60.0)
-	Game.add_log("Welcome back! %d min away, +%d activities." % [mins, n])
+	Game.add_log("Welcome back! %d min away, +%d cards." % [mins, n])
 	world.farmer.say("Oh, you're back!", 4.0)
 
 
 # ---------------------------------------------------------------- debug
 func _unhandled_input(event: InputEvent) -> void:
-	if not OS.is_debug_build() or not (event is InputEventKey) or not event.pressed:
+	if not OS.is_debug_build() or not (event is InputEventKey) or not event.pressed or world == null:
 		return
 	match event.keycode:
 		KEY_F1:
-			Game.add_card(Game.random_card())
+			cards.draw_card()
 		KEY_F2:
 			for i in 10:
-				Game.add_card(Game.random_card())
+				cards.draw_card()
 		KEY_F3:
 			director.random_event()
 		KEY_F4:
 			Game.time_scale = 10.0 if Game.time_scale == 1.0 else 1.0
 			Game.add_log("Debug time x%d" % int(Game.time_scale))
 		KEY_F5:
-			DirAccess.remove_absolute(ProjectSettings.globalize_path(Game.SAVE_PATH))
-			Game.reset()
+			var s := Game.slot
+			Game.running = false
+			_game_root.queue_free()
+			_game_root = null
 			world = null
-			get_tree().reload_current_scene()
+			delete_slot(s)
+			show_welcome(1)
+		KEY_F6:
+			Game.add_weird(10.0)

@@ -172,7 +172,8 @@ func _update_stats(d: float) -> void:
 		Game.health -= 1.0 * d
 		if randf() < d * 0.05:
 			say("Ugh... that snake bite...")
-	Game.mood += (60.0 - Game.mood) * 0.002 * d
+	var baseline := 75.0 if Game.has_relic("stones") else 60.0
+	Game.mood += (baseline - Game.mood) * 0.002 * d
 	Game.energy = clampf(Game.energy, 0.0, 100.0)
 	Game.health = clampf(Game.health, 0.0, 100.0)
 	Game.mood = clampf(Game.mood, 0.0, 100.0)
@@ -442,6 +443,8 @@ func _pick_crop() -> String:
 			continue
 		if Game.coins >= int(Game.CROPS[id]["seed"]) + 2:
 			opts.append(id)
+	if Game.buff("favor") and Game.favor_crop in opts and randf() < 0.75:
+		return Game.favor_crop
 	if opts.is_empty():
 		if Game.coins < 4 and world.crops.size() < 3:
 			return "turnip"  # grandpa's spare seeds: never soft-lock

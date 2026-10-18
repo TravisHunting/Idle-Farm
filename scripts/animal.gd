@@ -5,10 +5,12 @@ class_name Animal
 ##            boar (charges across a row, tramples, hits the farmer) · snake (hidden, poisons)
 ##            wasps (nest, stings when the farmer is near)
 ##  friendly: chicken (lays eggs) · dog (Watchdog card, chases threats) · merchant (buys produce)
-##            butterfly · bee (cosmetic)
+##            butterfly · bee · wisp (cosmetic)
+##  relic companions: homunculus (waters dry crops, steals eggs) · goat (eats weeds) · cat (lazes)
+##  visitor: a card's character walking in to deliver its line (sprite = card art)
 
 const THREATS := ["crow", "rabbit", "fox", "boar", "snake", "wasps"]
-const FACES_LEFT := ["rabbit", "fox", "boar", "chicken", "dog"]
+const FACES_LEFT := ["rabbit", "fox", "boar", "chicken", "dog", "goat"]
 
 var world  # World
 var kind := ""
@@ -31,6 +33,9 @@ var tint := Color.WHITE
 var hidden := false
 var home := Vector2.ZERO
 var egg_t := 0.0
+var sprite := ""
+var reply := ""
+var job: Variant = null
 
 
 func _init(w, k: String, p: Vector2) -> void:
@@ -76,6 +81,25 @@ func _init(w, k: String, p: Vector2) -> void:
 			speed = 20.0
 			life = randf_range(6.0, 10.0)
 			state = "flutter"
+		"wisp":
+			speed = 8.0
+			life = randf_range(25.0, 45.0)
+			state = "flutter"
+			tint = [Color("73eff7"), Color("a7f070"), Color("f4f4f4")].pick_random()
+		"visitor":
+			speed = 40.0
+			life = 6.0
+		"homunculus":
+			speed = 20.0
+			state = "follow"
+			timer = 8.0
+			egg_t = randf_range(150.0, 300.0)
+		"goat":
+			speed = 10.0
+			state = "wander"
+		"cat":
+			speed = 12.0
+			state = "wander"
 
 
 func is_threat() -> bool:
@@ -112,7 +136,7 @@ func scare() -> void:
 func _leave() -> void:
 	state = "leave"
 	speed *= 1.6
-	if kind in ["crow", "butterfly", "bee"]:
+	if kind in ["crow", "butterfly", "bee", "wisp"]:
 		exit_pos = Vector2(pos.x + randf_range(-60, 60), -40)
 	else:
 		exit_pos = Vector2(-24 if pos.x < world.COLS * 8 else world.COLS * 16 + 24, pos.y)
@@ -166,7 +190,11 @@ func update(d: float) -> void:
 		"chicken": _update_chicken(d)
 		"dog": _update_dog(d)
 		"merchant": _update_merchant(d)
-		"butterfly", "bee": _update_flutter(d)
+		"butterfly", "bee", "wisp": _update_flutter(d)
+		"visitor": _update_visitor(d)
+		"homunculus": _update_homunculus(d)
+		"goat": _update_goat(d)
+		"cat": _update_cat(d)
 
 
 func _update_leave(d: float) -> void:
@@ -183,6 +211,10 @@ func _update_pest(d: float) -> void:
 		_leave()
 		return
 	if _farmer_near(18.0) or _dog_near(26.0):
+		scare()
+		return
+	if Game.has_relic("living_scarecrow") and world.near_obj(world.cell_of(pos), "scarecrow", 3.0):
+		say("!", 1.0)
 		scare()
 		return
 	if target == null or not world.crops.has(target) or world.crops[target].get("dead", false):
@@ -255,8 +287,7 @@ func _update_fox(d: float) -> void:
 				Game.add_log("A fox dug up a crop.")
 				target = null
 				timer = 0.0
-				if randf() < 0.5:
-					_leave()
+				_leave()
 
 
 func _update_boar(d: float) -> void:
@@ -389,9 +420,8 @@ func _update_merchant(d: float) -> void:
 				else:
 					say("Nothing to sell? Next time!")
 				if randf() < 0.3:
-					var id := Game.random_card()
-					if Game.add_card(id):
-						Game.add_log("The merchant left a gift: %s." % Game.CARDS[id]["name"])
+					Game.draw_requested.emit()
+					Game.add_log("The merchant left a card on the step.")
 				_leave()
 		"leave":
 			_update_leave(d)
@@ -415,6 +445,102 @@ func _update_flutter(d: float) -> void:
 	_move(target, d)
 
 
+func _update_visitor(d: float) -> void:
+	if state == "leave":
+		_update_leave(d)
+		return
+	var f = world.farmer
+	var goal: Vector2 = (f.pos + Vector2(-16, 2)) if f != null and f.visible_outside() else world.feet(world.DOOR) + Vector2(10, 18)
+	goal.x = maxf(goal.x, 8.0)
+	if state == "enter":
+		if _move(goal, d):
+			state = "talk"
+			if reply != "":
+				say(reply, 4.0)
+	else:
+		flip = false
+		life -= d
+		if life <= 0.0:
+			_leave()
+
+
+func _update_homunculus(d: float) -> void:
+	egg_t -= d
+	if egg_t <= 0.0:
+		egg_t = randf_range(150.0, 300.0)
+		if Game.item_count("egg") > 0:
+			Game.add_item("egg", -1)
+			say("*crunch*", 2.0)
+	if state == "water":
+		if job == null or not world.crops.has(job):
+			state = "follow"
+			return
+		if _move(world.feet(job) + Vector2(4, 0), d):
+			timer -= d
+			if timer <= 0.0:
+				world.wet[world.idx(job)] = 1.0
+				world.puff(world.center(job), Color("41a6f6"), 6, 12.0)
+				state = "follow"
+				timer = randf_range(12.0, 20.0)
+		return
+	timer -= d
+	if timer <= 0.0:
+		timer = 4.0
+		for c in world.crops:
+			var cr: Dictionary = world.crops[c]
+			if not cr.get("dead", false) and cr["growth"] < 1.0 and world.wet[world.idx(c)] < 0.3:
+				job = c
+				state = "water"
+				timer = 1.2
+				return
+	var f = world.farmer
+	var goal: Vector2 = f.pos + Vector2(-10, 3) if f != null and f.visible_outside() else world.feet(world.DOOR) + Vector2(-6, 4)
+	if pos.distance_to(goal) > 8.0:
+		_move(goal, d)
+
+
+func _update_goat(d: float) -> void:
+	if job != null and world.obj_type(job) == "weed":
+		if _move(world.feet(job), d):
+			timer -= d
+			if timer <= 0.0:
+				world.remove_obj(job)
+				world.puff(world.center(job), Color("38b764"), 5)
+				if randf() < 0.3:
+					say("Mehhhh.", 2.0)
+				job = null
+		return
+	timer -= d
+	if timer <= 0.0:
+		timer = randf_range(3.0, 6.0)
+		var weeds: Array = world.cells_with_obj(["weed"])
+		if weeds.size() > 0:
+			job = world.nearest(weeds, world.cell_of(pos))
+			timer = 2.0
+			return
+		job = null
+		target = pos + Vector2(randf_range(-30, 30), randf_range(-20, 20))
+	if target != null:
+		target.x = clampf(target.x, 6, world.COLS * 16 - 6)
+		target.y = clampf(target.y, 40, world.ROWS * 16 - 4)
+		_move(target, d)
+
+
+func _update_cat(d: float) -> void:
+	timer -= d
+	if timer <= 0.0:
+		timer = randf_range(5.0, 12.0)
+		var f = world.farmer
+		if randf() < 0.4 and f != null and f.visible_outside():
+			target = f.pos + Vector2(randf_range(-14, 14), 6)
+		else:
+			target = world.feet(world.DOOR) + Vector2(randf_range(-10, 30), randf_range(2, 20))
+		if randf() < 0.15:
+			say("Mrrp.", 1.5)
+	if target != null:
+		_move(target, d)
+
+
 # ---------------------------------------------------------------- drawing
 func draw(ci: CanvasItem) -> void:
 	if hidden or dead:
@@ -432,6 +558,13 @@ func draw(ci: CanvasItem) -> void:
 			ci.draw_rect(Rect2(pos + Vector2(-1, y2), Vector2(2, 1)), Color("ffcd75"))
 			ci.draw_rect(Rect2(pos + Vector2(0, y2), Vector2(1, 1)), Color("1a1c2c"))
 			ci.draw_rect(Rect2(pos + Vector2(0, y2 - 1), Vector2(1, 1)), Color(1, 1, 1, 0.7))
+			return
+		"wisp":
+			var y3 := sin(anim_t * 3.0) * 2.0
+			var c := tint
+			c.a = 0.35
+			ci.draw_rect(Rect2(pos + Vector2(-1, y3 - 1), Vector2(3, 3)), c)
+			ci.draw_rect(Rect2(pos + Vector2(0, y3), Vector2(1, 1)), tint)
 			return
 		"wasps":
 			var nest := Art.tex("wasp_nest")
@@ -464,7 +597,18 @@ func draw(ci: CanvasItem) -> void:
 			frame = "merchant2" if state != "trade" and int(anim_t * 5.0) % 2 == 0 else "merchant"
 		"snake":
 			frame = "snake2" if int(anim_t * 3.0) % 2 == 0 else "snake"
+		"visitor":
+			frame = sprite
+		"homunculus":
+			frame = "v_homunculus"
+		"goat":
+			frame = "v_goat"
+		"cat":
+			frame = "v_cat"
 	var tx := Art.tex(frame)
+	var bounce := 0.0
+	if kind in ["visitor", "homunculus", "goat", "cat"] and state in ["enter", "leave", "follow", "water"]:
+		bounce = -1.0 if int(anim_t * 6.0) % 2 == 0 else 0.0
 	var w := tx.get_width()
 	var h := tx.get_height()
 	var lift := 0.0
@@ -476,7 +620,7 @@ func draw(ci: CanvasItem) -> void:
 	var face_left: bool = kind in FACES_LEFT
 	var mirror := flip != face_left
 	ci.draw_set_transform(pos + Vector2(0, -lift), 0.0, Vector2(-1.0 if mirror else 1.0, 1.0))
-	ci.draw_texture(tx, Vector2(-w / 2.0, -h), tint)
+	ci.draw_texture(tx, Vector2(-w / 2.0, -h + bounce), tint)
 	ci.draw_set_transform_matrix(Transform2D.IDENTITY)
 
 

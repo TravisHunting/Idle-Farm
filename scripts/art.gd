@@ -1138,6 +1138,9 @@ var _missing: ImageTexture
 func _ready() -> void:
 	for key in SPRITES:
 		_tex[key] = _from_ascii(SPRITES[key])
+	var strange: Dictionary = preload("res://scripts/art_strange.gd").SPRITES
+	for key in strange:
+		_tex[key] = _from_ascii(strange[key])
 	_paint_ground()
 	_tex["house"] = _paint_house()
 	_tex["coop"] = _paint_coop()

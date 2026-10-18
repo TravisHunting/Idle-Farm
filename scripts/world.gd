@@ -14,6 +14,8 @@ const BIN_FRONT := Vector2i(3, 2)
 const DIRS := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
 ## Object types that block movement (structures use Game.STRUCTS[...].solid).
 const SOLID_DEBRIS := ["rock", "stump", "tree", "ore", "bin", "house"]
+## Crops that glow faintly at night.
+const GLOWING := ["glowshroom", "moonflower", "starfruit"]
 const DEBRIS := ["rock", "weed", "stump", "ash", "ore"]
 
 var ground := PackedInt32Array()       # 0 grass, 1 tilled
@@ -313,8 +315,12 @@ func _update_ground(d: float) -> void:
 				var mult := 1.0
 				if Game.buff("sun"):
 					mult *= 2.0
+				if Game.buff("growth"):
+					mult *= 1.5
 				if near_obj(c, "beehive", 2.5):
 					mult *= 1.3
+				if near_obj(c, "idol", 3.0):
+					mult *= 1.5
 				cr["growth"] = minf(1.0, cr["growth"] + d / float(Game.CROPS[cr["type"]]["grow"]) * mult)
 				cr["health"] = minf(100.0, cr["health"] + d * 2.0)
 			else:
@@ -425,6 +431,8 @@ func _draw() -> void:
 		if st == 3:
 			bob = sin(_anim_t * 2.0 + c.x) * 0.5
 		draw_texture(Art.tex(name), Vector2(c.x * T, c.y * T + bob - 2), mod)
+		if st >= 2 and cr["type"] in GLOWING and Game.darkness() > 0.3:
+			draw_circle(center(c), 7.0, Color(0.45, 1.0, 0.95, 0.12 * Game.darkness()))
 
 
 # ---------------------------------------------------------------- save
