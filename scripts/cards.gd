@@ -183,9 +183,12 @@ func check(r: Array) -> Array:
 			var v := int(Game.stats.get(r[1], 0))
 			return [v >= int(r[2]), "%d %s (%d)" % [r[2], r[1], v]]
 		"inventory":
-			return [Game.inventory_count() >= int(r[1]), "produce to sell"]
-		"coins":
-			return [Game.coins >= int(r[1]), "%d coins (%d)" % [r[1], Game.coins]]
+			return [Game.inventory_count() >= int(r[1]), "produce to trade"]
+		"treasure":
+			var tn := Game.treasure_count(r[1])
+			return [tn >= int(r[2]), "%d %s in the chest (%d)" % [r[2], String(Game.TREASURES[r[1]]["name"]).to_lower(), tn]]
+		"wealth":
+			return [Game.wealth() >= int(r[1]), "a chest worth %d (%d)" % [r[1], Game.wealth()]]
 		"item":
 			var have := Game.item_count(r[1])
 			return [have >= int(r[2]), "%d %s (%d)" % [r[2], Game.ITEM_NAMES.get(r[1], r[1]), have]]
@@ -197,9 +200,6 @@ func auto_reqs(fx: Array) -> Array:
 	var out: Array = []
 	for e in fx:
 		match e[0]:
-			"coins":
-				if int(e[1]) < 0:
-					out.append(["coins", -int(e[1])])
 			"item":
 				if int(e[2]) < 0:
 					out.append(["item", e[1], -int(e[2])])
@@ -269,18 +269,18 @@ func _apply_one(e: Array) -> void:
 	var f := world.farmer
 	var fp: Vector2 = f.pos if f else world.center(world.DOOR)
 	match e[0]:
-		"coins":
-			var n := int(e[1])
-			if n > 0:
-				n = Game.scaled_reward(n)
-				world.float_text("+%d" % n, fp + Vector2(-6, -26))
-				world.puff(fp + Vector2(0, -10), Color("ffcd75"), 10, 20.0)
-			Game.add_coins(n)
-		"coins_pct":
-			var amt := int(Game.coins * absf(float(e[1])) / 100.0)
-			Game.add_coins(amt if float(e[1]) > 0.0 else -amt)
-			if float(e[1]) < 0.0:
-				world.float_text("-%d" % amt, fp + Vector2(-6, -26), Color("b13e53"))
+		"trinkets":
+			var got: Dictionary = world.loot_trinkets(Game.scaled_reward(int(e[1])), fp)
+			if not got.is_empty():
+				Game.add_log("Into the chest: %s." % Game.describe(got))
+		"loot":
+			world.loot(e[1], int(e[2]) if e.size() > 2 else 1, fp)
+		"uproot":
+			var cs2 := _alive_crops("", false)
+			cs2.shuffle()
+			for i in mini(int(e[1]), cs2.size()):
+				world.crops.erase(cs2[i])
+				world.puff(world.center(cs2[i]), Color("8b5a3c"), 5)
 		"item":
 			Game.add_item(e[1], int(e[2]))
 			if int(e[2]) > 0:
@@ -377,9 +377,10 @@ func _apply_one(e: Array) -> void:
 						world.puff(a.pos, Color("f4f4f4"), 8)
 						left -= 1
 		"sell":
-			var v := Game.sell_goods(float(e[1]))
-			if v > 0:
-				world.float_text("+%d" % v, fp + Vector2(-6, -26))
+			var tr: Dictionary = Game.trade_goods(float(e[1]))
+			if int(tr["worth"]) > 0:
+				world.float_text("+%d WORTH" % tr["worth"], fp + Vector2(-16, -26))
+				Game.add_log("Traded the produce for %s." % Game.describe(tr["got"]))
 		"take_ripe":
 			var ripe := _alive_crops(e[1], true)
 			for i in mini(int(e[2]), ripe.size()):
@@ -460,7 +461,9 @@ func _apply_one(e: Array) -> void:
 				if bc != null:
 					Game.add_log("A %s appeared on the farm." % Game.STRUCTS[e[1]]["name"])
 		"demolish":
-			for c in world.cells_with_obj([e[1]]):
+			var gone: Array = world.cells_with_obj([e[1]])
+			gone.shuffle()
+			for c in gone.slice(0, int(e[2]) if e.size() > 2 else gone.size()):
 				world.remove_obj(c)
 				world.puff(world.center(c), Color("c28a5a"), 10)
 		"trees":
@@ -685,7 +688,7 @@ func _altar_spot() -> Variant:
 
 # ---------------------------------------------------------------- relics
 const RELIC_STRUCTS := ["idol", "obelisk", "stones", "saucer"]
-const RELIC_ACTORS := {"homunculus": "homunculus", "goat": "goat", "black_cat": "cat"}
+const RELIC_ACTORS := {"homunculus": "homunculus", "goat": "goat", "black_cat": "cat", "hatchling": "hatchling"}
 
 
 func gain_relic(id: String) -> void:
@@ -747,10 +750,9 @@ func _on_new_day(_d: int) -> void:
 	if Game.has_relic("horseshoe"):
 		Game.charms = mini(5, Game.charms + 1)
 	if Game.has_relic("cursed_coin"):
-		var n := Game.scaled_reward(20)
-		Game.add_coins(n)
+		var got: Dictionary = Game.gain_trinkets(Game.scaled_reward(20))
 		Game.mood = maxf(0.0, Game.mood - 10.0)
-		Game.add_log("The cursed coin multiplied: +%d. The farmer feels uneasy." % n)
+		Game.add_log("The cursed coin left %s in the chest. The farmer feels uneasy." % Game.describe(got))
 
 
 ## Townsfolk friends drop by in the morning, each with their gift.
@@ -776,7 +778,7 @@ func friends_visit() -> void:
 						o["hp"] = Game.STRUCTS[o["type"]]["hp"]
 				Game.add_item("stone", 3)
 			"mayor":
-				Game.add_coins(Game.scaled_reward(25))
+				Game.gain_trinkets(Game.scaled_reward(25))
 			"kids":
 				world.clear_overgrowth(5)
 			"doc":

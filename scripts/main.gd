@@ -218,7 +218,7 @@ func _notification(what: int) -> void:
 func save_game() -> void:
 	if world == null or world.farmer == null or not Game.running and _game_root == null:
 		return
-	var meta := {"day": Game.day, "level": Game.level(), "coins": Game.coins, "weird": int(Game.weird),
+	var meta := {"day": Game.day, "level": Game.level(), "wealth": Game.wealth(), "weird": int(Game.weird),
 		"relics": Game.relics.size(), "play_seconds": Game.play_seconds, "farm": Game.farm_name}
 	var d := {"version": 3, "time": Time.get_unix_time_from_system(), "meta": meta,
 		"game": Game.to_dict(), "world": world.to_dict()}
@@ -301,8 +301,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_F3:
 			director.random_event()
 		KEY_F4:
-			Game.time_scale = 10.0 if Game.time_scale == 1.0 else 1.0
-			Game.add_log("Debug time x%d" % int(Game.time_scale))
+			Game.set_speed(10 if Game.time_scale == 1.0 else 1)
+			Game.add_log("Game speed x%d" % int(Game.time_scale))
 		KEY_F5:
 			var s := Game.slot
 			Game.running = false

@@ -565,9 +565,9 @@ func _draw_top() -> void:
 	draw_rect(Rect2(1, 1, 190, 1), C_BG)
 	draw_rect(Rect2(0, 2, 192, 14), C_BG)
 	draw_rect(Rect2(0, 15, 192, 1), C_EDGE)
-	draw_texture(Art.tex("coin"), Vector2(3, 4))
-	_txt(str(Game.coins), Vector2(12, 5), C_GOLD)
-	var lv_x := 12 + Art.text_width(str(Game.coins)) + 5
+	draw_texture(Art.tex("chest"), Vector2(3, 4))
+	_txt(str(Game.wealth()), Vector2(12, 5), C_GOLD)
+	var lv_x := 12 + Art.text_width(str(Game.wealth())) + 5
 	_txt("LV%d" % Game.level(), Vector2(lv_x, 3), C_GREEN)
 	_bar(Rect2(lv_x, 9, 15, 3), Game.level_progress(), C_GREEN)
 	_txt("DAY %d" % Game.day, Vector2(70, 3))

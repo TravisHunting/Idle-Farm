@@ -7,6 +7,7 @@ class_name Animal
 ##  friendly: chicken (lays eggs) · dog (Watchdog card, chases threats) · merchant (buys produce)
 ##            butterfly · bee · wisp (cosmetic)
 ##  relic companions: homunculus (waters dry crops, steals eggs) · goat (eats weeds) · cat (lazes)
+##            hatchling (from the strange egg mystery: follows the farmer, chases critters)
 ##  visitor: a card's character walking in to deliver its line (sprite = card art)
 
 const THREATS := ["crow", "rabbit", "fox", "boar", "snake", "wasps"]
@@ -100,6 +101,10 @@ func _init(w, k: String, p: Vector2) -> void:
 		"cat":
 			speed = 12.0
 			state = "wander"
+		"hatchling":
+			speed = 34.0
+			state = "follow"
+			timer = 6.0
 
 
 func is_threat() -> bool:
@@ -198,6 +203,7 @@ func update(d: float) -> void:
 		"homunculus": _update_homunculus(d)
 		"goat": _update_goat(d)
 		"cat": _update_cat(d)
+		"hatchling": _update_hatchling(d)
 
 
 func _update_leave(d: float) -> void:
@@ -395,8 +401,8 @@ func _update_dog(d: float) -> void:
 			near_t.scare()
 			Game.bump("shooed")
 			say("WOOF!", 1.5)
-			if Game.buff("bounty"):
-				Game.add_coins(6)
+			if Game.buff("bounty") and Game.CRITTER_SOUVENIRS.has(near_t.kind):
+				world.loot(Game.CRITTER_SOUVENIRS[near_t.kind], 1, pos)
 		return
 	state = "follow"
 	var f = world.farmer
@@ -414,13 +420,13 @@ func _update_merchant(d: float) -> void:
 		"trade":
 			timer -= d
 			if timer <= 0.0:
-				var v := Game.sell_goods(1.5)
-				if v > 0:
-					world.float_text("+%d" % v, pos + Vector2(-6, -24))
-					Game.add_log("The merchant bought everything for %d coins!" % v)
+				var tr: Dictionary = Game.trade_goods(1.5)
+				if int(tr["worth"]) > 0:
+					world.float_text("+%d WORTH" % tr["worth"], pos + Vector2(-16, -24))
+					Game.add_log("The merchant swapped all the produce for %s!" % Game.describe(tr["got"]))
 					say("Splendid produce!")
 				else:
-					say("Nothing to sell? Next time!")
+					say("Nothing to trade? Next time!")
 				if randf() < 0.3:
 					Game.draw_requested.emit()
 					Game.add_log("The merchant left a card on the step.")
@@ -543,6 +549,36 @@ func _update_cat(d: float) -> void:
 		_move(target, d)
 
 
+## The hatchling: trots after the farmer, pounces on critters, puffs a little smoke.
+func _update_hatchling(d: float) -> void:
+	var near_t: Variant = null
+	var bd := 90.0
+	for a in world.threats():
+		var dd: float = a.pos.distance_to(pos)
+		if dd < bd:
+			bd = dd
+			near_t = a
+	if near_t != null:
+		state = "chase"
+		if _move(near_t.pos, d, speed * 1.1) or bd < 10.0:
+			near_t.scare()
+			Game.bump("shooed")
+			say(["*RAWR*", "*squeak!*", "*tiny roar*"].pick_random(), 1.5)
+			world.puff(pos + Vector2(6 if not flip else -6, -8), Color("ef7d57"), 5, 10.0)
+		return
+	state = "follow"
+	timer -= d
+	if timer <= 0.0:
+		timer = randf_range(10.0, 25.0)
+		if randf() < 0.4:
+			say(["*chirp*", "*hic* (smoke)", "*purr-rumble*"].pick_random(), 1.5)
+			world.puff(pos + Vector2(0, -10), Color("94b0c2"), 3, 6.0)
+	var f = world.farmer
+	var goal: Vector2 = f.pos + Vector2(12, 6) if f != null and f.visible_outside() else world.feet(world.DOOR) + Vector2(14, 6)
+	if pos.distance_to(goal) > 10.0:
+		_move(goal, d, speed * 0.6)
+
+
 # ---------------------------------------------------------------- drawing
 func draw(ci: CanvasItem) -> void:
 	if hidden or dead:
@@ -607,9 +643,11 @@ func draw(ci: CanvasItem) -> void:
 			frame = "v_goat"
 		"cat":
 			frame = "v_cat"
+		"hatchling":
+			frame = "v_hatchling"
 	var tx := Art.tex(frame)
 	var bounce := 0.0
-	if kind in ["visitor", "homunculus", "goat", "cat"] and state in ["enter", "leave", "follow", "water"]:
+	if kind in ["visitor", "homunculus", "goat", "cat", "hatchling"] and state in ["enter", "leave", "follow", "water"]:
 		bounce = -1.0 if int(anim_t * 6.0) % 2 == 0 else 0.0
 	var w := tx.get_width()
 	var h := tx.get_height()

@@ -119,7 +119,7 @@ func ignite(c: Vector2i) -> void:
 	if not world.in_bounds(c) or world.is_house(c):
 		return
 	var t := world.obj_type(c)
-	if t in ["fire", "bin", "rod", "well", "idol", "obelisk", "stones", "saucer"]:
+	if t in ["fire", "bin", "rod", "well", "idol", "obelisk", "stones", "saucer"] or t in World.MYSTERY:
 		return
 	var flammable := world.crops.has(c) or t in FLAMMABLE
 	if not flammable:
@@ -280,6 +280,9 @@ func run_event(id: String) -> void:
 			for i in randi_range(4, 7):
 				spawn_animal("wisp", Vector2(randf_range(10, 180), randf_range(30, world.ROWS * 16 - 16)))
 			Game.add_log("Pale wisps drift across the fields.")
+			if world.farmer and world.farmer.visible_outside() and randf() < 0.4:
+				world.loot("wisp_jar")
+				world.farmer.say("Got one! In the jar you go.")
 		"knock":
 			Game.add_log("Someone knocked three times. Nobody was there. A card lay on the step.")
 			cards.draw_card()
@@ -294,6 +297,8 @@ func run_event(id: String) -> void:
 			Game.add_item("ore", 1)
 			Game.add_weird(2.0)
 			Game.add_log("A crop circle appeared overnight. The crops inside are ripe.")
+			if alive.size() > 0:
+				world.loot("alien_bolt", 1, world.center(alive[0]))
 		"mutation":
 			for c in world.crops:
 				var cr: Dictionary = world.crops[c]
@@ -307,6 +312,9 @@ func run_event(id: String) -> void:
 			if world.farmer:
 				world.farmer.say(["The ground is talking again.", "Who keeps calling my name?", "I dreamt of the field. It was awake."].pick_random(), 4.0)
 			Game.add_log("The farmer hears whispers.")
+			if randf() < 0.3:
+				world.loot("tome_page")
+				Game.add_log("A torn page was lying on the doorstep. The ink is still wet.")
 		"abduction":
 			var chickens: Array = []
 			for a in world.animals:
@@ -329,12 +337,15 @@ func run_event(id: String) -> void:
 				weather_fx.beam(p)
 			Game.add_item("ore", 2)
 			Game.add_weird(2.0)
+			if randf() < 0.5:
+				world.loot("star_shard", 1, p)
 		"lucky":
-			var amt := 3 + lv * 2
-			Game.add_coins(amt)
 			if world.farmer:
-				world.farmer.say("Ooh, a coin in the dirt!")
-				world.float_text("+%d" % amt, world.farmer.pos + Vector2(-4, -24))
+				var finds := ["marble", "ribbon", "button", "tin_soldier", "arrowhead", "rusty_key"]
+				if lv >= 3:
+					finds += ["silver_spoon", "pocket_watch"]
+				world.loot(finds.pick_random())
+				world.farmer.say(["Ooh, something shiny in the dirt!", "Finders keepers!", "For the chest!"].pick_random())
 
 
 func _obj_name(c: Vector2i) -> String:
@@ -427,12 +438,10 @@ func do_action(id: String) -> void:
 				world.wet[world.idx(spot)] = 1.0
 				world.puff(world.center(spot), Color("ffcd75"), 14, 20.0)
 				Game.add_log("A golden seed sprouts!")
-		"coins":
+		"trinkets":
 			var amt := int((10 + lv * 8) * randf_range(0.8, 1.4))
-			Game.add_coins(amt)
 			var p := f.pos if f and f.visible_outside() else world.center(world.BIN)
-			world.puff(p + Vector2(0, -10), Color("ffcd75"), 14, 24.0)
-			world.float_text("+%d" % amt, p + Vector2(-6, -26))
+			world.loot_trinkets(amt, p)
 		"clear":
 			set_weather("sunny", 180.0)
 			Game.mood = minf(100.0, Game.mood + 10.0)
@@ -444,7 +453,7 @@ func do_action(id: String) -> void:
 			for y in range(3, world.ROWS):
 				for x in world.COLS:
 					var c := Vector2i(x, y)
-					if world.obj_type(c) != "bin":
+					if world.obj_type(c) != "bin" and not world.obj_type(c) in World.MYSTERY:
 						cells.append(c)
 			var c2: Vector2i = cells.pick_random()
 			if weather_fx:
@@ -458,6 +467,7 @@ func do_action(id: String) -> void:
 			if f and f.visible_outside() and f.pos.distance_to(world.feet(c2)) < 24.0:
 				f.hurt(15, "flying meteor debris")
 			Game.add_log("A meteorite crashed into the farm!")
+			world.loot("star_shard", 1, world.center(c2))
 			if f:
 				f.say("WHAT WAS THAT?!")
 		"bloom":
@@ -500,7 +510,7 @@ func do_action(id: String) -> void:
 				spawn_animal("crow", Vector2(randf_range(0, world.COLS * 16), -20))
 			for i in 2:
 				spawn_animal("rabbit", _edge_pos())
-			Game.add_log("Critters incoming! +6 coins per shoo.")
+			Game.add_log("Critters incoming! Every shoo leaves a souvenir.")
 		"repair":
 			for c in world.objs:
 				var o: Dictionary = world.objs[c]

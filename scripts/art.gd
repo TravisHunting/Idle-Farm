@@ -1144,6 +1144,11 @@ func _ready() -> void:
 	var farm: Dictionary = preload("res://scripts/art_farm.gd").SPRITES
 	for key in farm:
 		_tex[key] = _from_ascii(farm[key])
+	var chest_art = preload("res://scripts/art_chest.gd")
+	var chest: Dictionary = chest_art.SPRITES.merged(chest_art.variants())
+	for key in chest:
+		_tex[key] = _from_ascii(chest[key])
+	_tex["ufo"] = _tex["saucer"]   # the landed saucer of the "Lights in the Sky" mystery
 	_tex["pine"] = _paint_pine()
 	_tex["gear"] = _from_ascii([".7.7.7.", "7777777", ".77.77.", "777.777", ".77.77.", "7777777", ".7.7.7."])
 	_paint_ground()

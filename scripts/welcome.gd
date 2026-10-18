@@ -234,7 +234,7 @@ func _draw_slots() -> void:
 		elif m.has("broken"):
 			_txt("SAVE DAMAGED - DELETE TO REUSE", box.position + Vector2(5, 16), C_RED)
 		else:
-			_txt("DAY %d   LV %d   %d COINS" % [m.get("day", 1), m.get("level", 1), m.get("coins", 0)], box.position + Vector2(5, 16), C_TEXT)
+			_txt("DAY %d   LV %d   %d WORTH" % [m.get("day", 1), m.get("level", 1), m.get("wealth", m.get("coins", 0))], box.position + Vector2(5, 16), C_TEXT)
 			var w := int(m.get("weird", 0))
 			var line2 := "WEIRD %d   RELICS %d" % [w, m.get("relics", 0)]
 			_txt(line2, box.position + Vector2(5, 25), C_PURPLE if w >= 10 else C_DIM)

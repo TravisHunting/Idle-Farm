@@ -36,6 +36,9 @@ const CLEARABLE := {
 const TREES := ["tree", "pine"]
 ## Object types that block movement (structures use Game.STRUCTS[...].solid).
 const SOLID_DEBRIS := ["rock", "boulder", "stump", "log", "bush", "bramble", "tree", "pine", "ore", "bin"]
+## Objects left by the mysteries (sagas.gd): never cleared, burned or built over. Solid ones block.
+const MYSTERY := ["strange_egg", "strange_egg_glow", "strange_egg_cracked", "ufo", "glyph", "candle", "bootprints"]
+const MYSTERY_SOLID := ["strange_egg", "strange_egg_glow", "strange_egg_cracked", "ufo"]
 ## Crops that glow faintly at night.
 const GLOWING := ["glowshroom", "moonflower", "starfruit"]
 ## Things that count as "overgrowth" for regrowth caps and the cleared % stat.
@@ -170,7 +173,8 @@ func new_farm() -> void:
 	_open_up()
 	Game.farm_name = (b["names"] as Array)[rng.randi() % (b["names"] as Array).size()]
 	Game.quirk = Game.QUIRKS.keys()[rng.randi() % Game.QUIRKS.size()]
-	Game.coins = rng.randi_range(18, 40)
+	# grandpa left a few trinkets in the chest
+	Game.gain_trinkets(rng.randi_range(18, 40), false)
 	farmer = Farmer.new(self)
 	farmer.pos = feet(DOOR)
 
@@ -371,7 +375,7 @@ func is_solid(c: Vector2i) -> bool:
 	if not objs.has(c):
 		return false
 	var t := obj_type(c)
-	if t in SOLID_DEBRIS:
+	if t in SOLID_DEBRIS or t in MYSTERY_SOLID:
 		return true
 	if Game.STRUCTS.has(t):
 		return Game.STRUCTS[t]["solid"]
@@ -1053,6 +1057,32 @@ func puff(p: Vector2, c: Color, n: int = 6, speed: float = 18.0, up: float = 10.
 
 func float_text(text: String, p: Vector2, c: Color = Color("ffcd75")) -> void:
 	floats.append({"text": text, "p": p, "t": 0.0, "c": c})
+
+
+## Treasure for the chest, with a little floating label above p (default: the farmer).
+func loot(id: String, n: int = 1, p: Vector2 = Vector2(-1, -1)) -> void:
+	if n <= 0 or not Game.TREASURES.has(id):
+		return
+	Game.add_treasure(id, n)
+	if p.x < 0.0:
+		p = farmer.pos if farmer != null else feet(DOOR)
+	var nm: String = String(Game.TREASURES[id]["name"]).to_upper()
+	var s: String = ("+" + nm) if n == 1 else "+%d %s" % [n, nm]
+	float_text(s, p + Vector2(-Art.text_width(s) / 2.0, -30), Color("e8b04b"))
+	puff(p + Vector2(0, -12), Color("ffcd75"), 6, 14.0)
+
+
+## Trinkets worth n for the chest (scaled by the caller), with a floating label.
+func loot_trinkets(n: int, p: Vector2 = Vector2(-1, -1)) -> Dictionary:
+	if n <= 0:
+		return {}
+	var got: Dictionary = Game.gain_trinkets(n)
+	if p.x < 0.0:
+		p = farmer.pos if farmer != null else feet(DOOR)
+	var s := "+%d WORTH" % n
+	float_text(s, p + Vector2(-Art.text_width(s) / 2.0, -30), Color("e8b04b"))
+	puff(p + Vector2(0, -12), Color("ffcd75"), 10, 20.0)
+	return got
 
 
 func _update_fx(d: float) -> void:

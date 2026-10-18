@@ -15,7 +15,7 @@ const LINES := {
 	"plant": ["Grow big, little one!", "In you go!", "Seeds of the future."],
 	"water": ["Drink up!", "Splish splash.", "Thirsty little guys."],
 	"harvest": ["Look at this beauty!", "Harvest time!", "Yum!"],
-	"sell": ["Cha-ching!", "Off to market!", "Fair price, I'd say."],
+	"sell": ["Ooh, what did I get?", "Trade you a turnip for that!", "Shiny! Into the chest."],
 	"build": ["Hammer time!", "This'll look great.", "Building something nice!"],
 	"demolish": ["Doesn't spark joy.", "Out with the old!", "Hmm, that has to go."],
 	"rearrange": ["Wouldn't this look better over there?", "Feng shui time!", "Let's move this."],
@@ -31,7 +31,6 @@ const LINES := {
 	"night": ["Time for bed.", "What a day.", "Nighty night, farm."],
 	"idle": ["What a lovely day.", "La la la~", "I should build something...", "Hmm hm hmm.",
 		"Crops are coming along!", "Wonder what's for dinner.", "Nice breeze today.", "I love this farm."],
-	"broke": ["Wallet's empty...", "Grandpa's spare seeds it is."],
 	"fire": ["FIRE! Water, quick!", "Not the crops!"],
 	"click": ["Oh! Hello there!", "Hey, you!", "Need something?", "Busy busy!", "Nice to see you!",
 		"Did you hear a crow?", "Thanks for the help!"],
@@ -155,6 +154,8 @@ func update(d: float) -> void:
 				say_line("heat")
 			elif Game.energy < 25.0:
 				say_line("tired")
+			elif randf() < 0.3:
+				say(Game.chest_comment(), 4.0)   # he likes to think about his chest
 			else:
 				say_line("idle")
 
@@ -259,8 +260,11 @@ func faint() -> void:
 
 
 func _recover() -> void:
-	var bill := 0 if Game.friends.has("doc") else int(Game.coins * 0.3)
-	Game.add_coins(-bill)
+	# no money: the doctor takes the shiniest thing in the chest instead (Doc Hollis is free)
+	var fee := "" if Game.friends.has("doc") else Game.best_tradeable()
+	if fee != "":
+		Game.remove_treasure(fee, 1)
+	var fee_name: String = String(Game.TREASURES[fee]["name"]).to_lower() if fee != "" else ""
 	Game.health = 45.0
 	Game.energy = maxf(Game.energy, 50.0)
 	Game.poison = 0.0
@@ -268,8 +272,13 @@ func _recover() -> void:
 	pos = world.feet(world.DOOR)
 	state = "idle"
 	think_t = 1.0
-	say("Doc patched me up... -%d coins." % bill if bill > 0 else "Doc Hollis patched me up. Free!", 4.0)
-	Game.add_log("Doctor's bill: -%d coins." % bill)
+	if fee != "":
+		say("Doc took my %s as payment..." % fee_name, 4.0)
+		Game.add_log("The doctor took a %s from the chest as payment." % fee_name)
+	elif Game.friends.has("doc"):
+		say("Doc Hollis patched me up. Free!", 4.0)
+	else:
+		say("Doc patched me up. Took pity on my empty chest.", 4.0)
 
 
 func on_click() -> void:
@@ -437,7 +446,7 @@ func _choose() -> void:
 	var inv := Game.inventory_count()
 	var inv_value := Game.inventory_value()
 	var sell_at := 70 if Game.quirk == "thrifty" else 30
-	if inv_value >= sell_at or (inv_value >= 8 and (Game.is_evening() or Game.coins < 10)):
+	if inv_value >= sell_at or (inv_value >= 8 and Game.is_evening()):
 		cands.append([46 + inv * 2, {"kind": "sell", "cell": world.BIN, "adj": true, "dur": 1.5}])
 
 	# get a little field going before spending money on buildings
@@ -454,7 +463,7 @@ func _choose() -> void:
 			var maxhp: int = Game.STRUCTS[o["type"]]["hp"]
 			if not _can_reach(c, reach):
 				continue
-			if o["hp"] < maxhp * 0.6 and Game.coins >= 5:
+			if o["hp"] < maxhp * 0.6:
 				cands.append([38, {"kind": "repair", "cell": c, "adj": true, "dur": 2.5, "tool": "tool_hammer"}])
 				break
 
@@ -473,7 +482,7 @@ func _choose() -> void:
 	if decor.size() > 0:
 		cands.append([3, {"kind": "demolish", "cell": decor.pick_random(), "adj": true, "dur": 2.0, "tool": "tool_hammer"}])
 
-	if Game.item_count("wood") < 3 or Game.coins < 15:
+	if Game.item_count("wood") < 6:
 		var trees: Array = []
 		for c in world.cells_with_obj(World.TREES):
 			if _can_reach(c, reach) and not world.is_planned(c):
@@ -506,20 +515,15 @@ func _can_reach(c: Vector2i, reach: Dictionary) -> bool:
 	return false
 
 
-## What to sow on cell c: the field's plan (one crop / a silly mix / his whim), within budget.
+## What to sow on cell c: the field's plan (one crop / a silly mix / his whim).
+## Seeds are free: he saves them from the last harvest.
 func _pick_crop(c: Vector2i = Vector2i(-1, -1)) -> String:
 	var opts: Array = []
 	for id in Game.CROPS:
-		if id == "melon" or not Game.crop_unlocked(id):
-			continue
-		if Game.coins >= int(Game.CROPS[id]["seed"]) + 2:
+		if id != "melon" and Game.crop_unlocked(id):
 			opts.append(id)
 	if Game.buff("favor") and Game.favor_crop in opts and randf() < 0.75:
 		return Game.favor_crop
-	if opts.is_empty():
-		if Game.coins < 4 and world.crops.size() < 3:
-			return "turnip"  # grandpa's spare seeds: never soft-lock
-		return ""
 	if Game.quirk == "sunny" and "sunflower" in opts and randf() < 0.6:
 		return "sunflower"
 	var fi: int = world.field_index(c)
@@ -544,7 +548,7 @@ func _pick_build() -> Dictionary:
 		var def: Dictionary = Game.STRUCTS[id]
 		if def["level"] > lv or world.count_obj(id) >= def["max"]:
 			continue
-		if not Game.can_afford(def) or Game.coins < int(def["cost"]) + 8:
+		if not Game.can_afford(def):
 			continue
 		var w := 1.0
 		match id:
@@ -633,7 +637,7 @@ func _describe(t: Dictionary) -> String:
 		"clear_crop": return "Clearing a dead crop"
 		"clear": return "Clearing %s" % _debris_name(world.obj_type(c))
 		"mine": return "Mining meteor ore"
-		"sell": return "Selling produce"
+		"sell": return "Trading produce"
 		"build": return "Building a %s" % Game.STRUCTS[t["what"]]["name"]
 		"repair": return "Repairing the %s" % _sname(world.obj_type(c))
 		"demolish": return "Tearing down the %s" % _sname(world.obj_type(c))
@@ -775,9 +779,9 @@ func _do_shoo(a) -> void:
 	say_line("shoo", 0.6)
 	a.scare()
 	Game.bump("shooed")
-	if Game.buff("bounty"):
-		Game.add_coins(6)
-		world.float_text("+6", pos + Vector2(-4, -24))
+	# fleeing critters leave something behind (always, with a Bounty posted)
+	if Game.CRITTER_SOUVENIRS.has(a.kind) and (Game.buff("bounty") or randf() < 0.3):
+		world.loot(Game.CRITTER_SOUVENIRS[a.kind], 1, pos)
 	state = "work"
 	task = {"kind": "wander", "cell": cell(), "dur": 0.7, "tool": "tool_hoe"}
 	work_t = 0.7
@@ -811,11 +815,6 @@ func _finish() -> void:
 		"plant":
 			if world.is_tilled(c) and not world.crops.has(c) and not world.objs.has(c):
 				var crop: String = task["crop"]
-				var seed: int = Game.CROPS[crop]["seed"]
-				if Game.coins >= seed:
-					Game.add_coins(-seed)
-				else:
-					say_line("broke")
 				world.plant(c, crop)
 				world.puff(world.center(c), Color("5a3626"), 4, 10.0)
 		"water":
@@ -841,6 +840,8 @@ func _finish() -> void:
 				if type == "melon":
 					Game.add_log("A golden melon was harvested!")
 					say("It's... it's GOLDEN!")
+				elif type == "sunflower" and randf() < 0.5:
+					world.loot("sunflower_seeds", randi_range(1, 3), pos)
 		"clear_crop":
 			if world.crops.has(c) and world.crops[c].get("dead", false):
 				world.crops.erase(c)
@@ -861,12 +862,18 @@ func _finish() -> void:
 					hurt(4, "thorny brambles")
 				if randf() < 0.03 and world.cleared_ratio() < 0.5:
 					say_line("overgrown")
+				# grandpa's junk turns up in the undergrowth
+				if randf() < 0.06:
+					world.loot(["old_bottle", "old_bottle", "rusty_key", "arrowhead", "marble"].pick_random(), 1, pos)
+					say(["Ooh, what's this?", "Into the chest you go!", "Grandpa's junk... MY junk now."].pick_random())
 		"mine":
 			if world.obj_type(c) == "ore":
 				world.remove_obj(c)
 				Game.add_item("ore", 2)
 				world.float_text("+2 ORE", pos + Vector2(-12, -24), Color("73eff7"))
 				world.puff(world.center(c), Color("73eff7"), 10)
+				if randf() < 0.2:
+					world.loot("geode", 1, pos)
 		"chop":
 			if world.obj_type(c) in World.TREES:
 				world.remove_obj(c)
@@ -874,11 +881,14 @@ func _finish() -> void:
 				Game.add_item("wood", 4)
 				world.float_text("+4 WOOD", pos + Vector2(-14, -24), Color("e0c08a"))
 				world.puff(world.center(c) + Vector2(0, -8), Color("2a8a4a"), 14, 22.0)
+				if randf() < 0.12:
+					world.loot("birds_nest", 1, pos)
 		"sell":
-			var v := Game.sell_goods()
-			if v > 0:
-				world.float_text("+%d" % v, world.center(world.BIN) + Vector2(-6, -18))
-				Game.add_log("Sold produce for %d coins." % v)
+			# the village trader empties the bin and leaves trinkets in exchange
+			var tr: Dictionary = Game.trade_goods()
+			if int(tr["worth"]) > 0:
+				world.float_text("+%d WORTH" % tr["worth"], world.center(world.BIN) + Vector2(-16, -18))
+				Game.add_log("Traded produce for %s." % Game.describe(tr["got"]))
 		"build":
 			var what: String = task["what"]
 			var bdef: Dictionary = Game.STRUCTS[what]
@@ -897,16 +907,17 @@ func _finish() -> void:
 			var o: Dictionary = world.obj_at(c)
 			if not o.is_empty() and Game.STRUCTS.has(o["type"]):
 				o["hp"] = Game.STRUCTS[o["type"]]["hp"]
-				Game.add_coins(-3)
 				say("Good as new!")
 		"demolish":
 			var t2: String = world.obj_type(c)
 			if Game.STRUCTS.has(t2):
-				var refund := int(Game.STRUCTS[t2]["cost"] * 0.3)
+				# half the materials are salvaged
+				var m: Dictionary = Game.STRUCTS[t2].get("mats", {})
+				for k in m:
+					Game.add_item(k, int(m[k]) / 2)
 				world.remove_obj(c)
-				Game.add_coins(refund)
 				world.puff(world.center(c), Color("c28a5a"), 10)
-				Game.add_log("Tore down the %s (+%d)." % [Game.STRUCTS[t2]["name"], refund])
+				Game.add_log("Tore down the %s." % Game.STRUCTS[t2]["name"])
 		"pickup":
 			var o2: Dictionary = world.obj_at(c)
 			if not o2.is_empty() and Game.STRUCTS.has(o2["type"]) and Game.STRUCTS[o2["type"]]["movable"]:
