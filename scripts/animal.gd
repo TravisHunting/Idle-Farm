@@ -250,7 +250,7 @@ func _update_fox(d: float) -> void:
 		if target is Animal and target.state == "carried":
 			target.pos = pos + Vector2(-6 if not flip else 6, -2)
 		_update_leave(d)
-		if dead and target is Animal:
+		if dead and target is Animal and target.state == "carried":
 			target.dead = true
 		return
 	life -= d
@@ -265,7 +265,7 @@ func _update_fox(d: float) -> void:
 		return
 	if target == null:
 		for a in world.animals:
-			if a.kind == "chicken" and not a.dead and not a.hidden and a.state != "carried":
+			if (a.kind == "chicken" or (a is Alien and a.caste == "spawn")) and not a.dead and not a.hidden and a.state != "carried":
 				target = a
 				break
 		if target == null:
@@ -279,6 +279,10 @@ func _update_fox(d: float) -> void:
 			return
 		if _move(target.pos, d):
 			target.state = "carried"
+			if target is Alien:
+				Game.add_log("A fox snatched an alien spawnling!")
+				_leave()
+				return
 			Game.add_log("A fox snatched a chicken!")
 			Game.mood = maxf(0.0, Game.mood - 8.0)
 			if f != null:
@@ -309,13 +313,13 @@ func _update_boar(d: float) -> void:
 			world.crops.erase(c)
 			world.puff(world.feet(c), Color("a7f070"), 6)
 		var o: Dictionary = world.obj_at(c)
-		if not o.is_empty() and Game.STRUCTS.has(o["type"]) and o["type"] != "rod":
+		if not o.is_empty() and (Game.STRUCTS.has(o["type"]) or o["type"] in World.ALIEN_SOLID) and o["type"] != "rod":
 			if timer <= 0.0:
 				o["hp"] -= 25
 				timer = 0.6
 				world.puff(world.feet(c), Color("c28a5a"), 6)
 				if o["hp"] <= 0:
-					Game.add_log("The boar smashed the %s!" % Game.STRUCTS[o["type"]]["name"])
+					Game.add_log("The boar smashed the %s!" % (Game.STRUCTS[o["type"]]["name"] if Game.STRUCTS.has(o["type"]) else "alien " + String(Colony.BUILDINGS[o["type"]]["name"])))
 					world.remove_obj(c)
 	timer -= d
 	if not hit_farmer and _farmer_near(9.0):

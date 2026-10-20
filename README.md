@@ -38,6 +38,12 @@ every morning, a new ability for the farmer... or a fleshy book that whispers at
 - **It gets weird.** A hidden Weirdness meter rises with your choices. The farm takes on a violet
   tint, wisps drift over the fields, glowshrooms and moonflowers glow at night, dark totems
   gather around an altar, and someone keeps knocking on the door.
+- **The neighbours are aliens.** Sometimes. An egg falls into the long grass, a saucer comes down,
+  a stranger in a long coat asks about land, or something low and many-legged gets into the coop.
+  They hatch, grow up, build a glowing village, spread their purple creep, trade, raid, send envoys,
+  abduct the farmer (he comes back with an antenna), split, go to war, and one day go home.
+- **It never settles down.** The farm, the aliens and the wild compete for the land, and the tides
+  knock down whoever gets too comfortable.
 - **Plays nicely in the background.** Borderless, always on top, docks to either screen edge,
   three save slots that save themselves, and progress keeps ticking while you're away.
 
@@ -88,4 +94,5 @@ Saves live in `%APPDATA%/Godot/app_userdata/IdleFarm/` on Windows.
 - Card content lives in [`scripts/deck.gd`](scripts/deck.gd), written in a small documented
   mini-language. Adding a card is a single dictionary entry.
 - Debug keys (debug builds only): `F1` new card, `F2` fill the box, `F3` random event,
-  `F4` 10x speed, `F5` wipe the current slot, `F6` +10 weirdness.
+  `F4` 10x speed, `F5` wipe the current slot, `F6` +10 weirdness, `F7` alien arrival, `F8` turn the tides.
+- Headless simulation test: `Godot_v4.7.2-stable_win64.exe --headless --path . -s tests/sim_test.gd -- days=8`.

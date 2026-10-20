@@ -114,6 +114,18 @@ const FRIENDS := {
 	"doc":    {"name": "Doc Hollis", "icon": "r_doc", "sprite": "v_villager", "tint": "f4f4f4", "desc": "Free house calls. Heals daily."},
 }
 
+## Drastic changes the aliens can make to the farmer (colony.gd: abductions, the lurker, cards).
+## Hooks: farmer.gd (draw overlays, green/tentacle/glow), colony.gd (antenna/hive_mind relations),
+## alien.gd (third_eye spots lurkers), director.gd (glow keeps foxes off), cards.gd (Doc cures).
+const MUTATIONS := {
+	"antenna":   {"name": "Antenna", "desc": "Hears the aliens humming. They like him more."},
+	"green":     {"name": "Green Skin", "desc": "Photosynthesises: energy comes back in the sun."},
+	"third_eye": {"name": "Third Eye", "desc": "Sees lurkers in the dark. The farm gets weirder."},
+	"glow":      {"name": "Glowing", "desc": "Glows at night. Foxes keep their distance."},
+	"tentacle":  {"name": "Tentacle Arm", "desc": "Works 30% faster. Deeply unsettling."},
+	"hive_mind": {"name": "Hive Whispers", "desc": "Shares a larder with the hive. No more raids."},
+}
+
 ## The farmer's personality, rolled when a farm is founded.
 const QUIRKS := {
 	"tidy":      {"name": "Tidy", "desc": "Can't stand overgrowth; clears first."},
@@ -229,6 +241,9 @@ var seen := {}           # card id -> times drawn
 var log_lines: Array = []
 var stats := {"harvested": 0, "shooed": 0, "cards": 0, "faints": 0, "built": 0}
 var sagas := {}          # mystery id -> {stage, t, data, done} (see sagas.gd)
+var colony := {}         # the alien faction's state (colony.gd)
+var mutations := {}      # id -> true (see MUTATIONS)
+var tides := {}          # faction balance history + timers (tides.gd)
 var settings := {"dock": "right", "card_minutes": DEFAULT_CARD_MINUTES, "speed": 1}
 var time_scale := 1.0    # game speed (fast forward), from settings["speed"]
 var play_seconds := 0.0
@@ -259,6 +274,9 @@ func reset() -> void:
 	played = {}
 	chest = {}
 	sagas = {}
+	colony = {}
+	mutations = {}
+	tides = {}
 
 
 func _process(delta: float) -> void:
@@ -605,6 +623,10 @@ func has_relic(id: String) -> bool:
 	return relics.has(id)
 
 
+func has_mutation(id: String) -> bool:
+	return mutations.has(id)
+
+
 # ---------------------------------------------------------------- misc
 func add_log(text: String) -> void:
 	log_lines.append(text)
@@ -661,6 +683,7 @@ func to_dict() -> Dictionary:
 		"mood": mood, "poison": poison, "stats": stats, "log": log_lines, "weird": weird,
 		"relics": relics, "unlocked": unlocked, "favor_crop": favor_crop, "pending": pending,
 		"seen": seen, "play_seconds": play_seconds,
+		"colony": colony, "mutations": mutations, "tides": tides,
 	}
 
 
@@ -675,6 +698,9 @@ func from_dict(d: Dictionary) -> void:
 	if d.has("coins") and not d.has("chest"):
 		gain_trinkets(int(d["coins"]), false)
 	sagas = d.get("sagas", {})
+	colony = d.get("colony", {})
+	mutations = d.get("mutations", {})
+	tides = d.get("tides", {})
 	day = int(d.get("day", day))
 	time_of_day = float(d.get("time_of_day", time_of_day))
 	weather = String(d.get("weather", weather))

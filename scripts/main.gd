@@ -12,6 +12,8 @@ const AUTOSAVE_EVERY := 20.0
 var world: World
 var director: Node
 var cards: Node
+var colony: Colony
+var tides: Tides
 var hud: Control
 var farm_view: Control
 var weather_fx: Node2D
@@ -94,6 +96,11 @@ func _build() -> void:
 	world = World.new()
 	world.name = "World"
 	farm_view.add_child(world)
+	# the alien colony exists before the world loads, so saved aliens can find it
+	colony = Colony.new()
+	colony.name = "Colony"
+	colony.world = world
+	world.colony = colony
 	var ents := preload("res://scripts/entity_layer.gd").new()
 	ents.name = "Entities"
 	ents.world = world
@@ -123,6 +130,17 @@ func _build() -> void:
 	cards.director = director
 	director.cards = cards
 	_game_root.add_child(cards)
+	director.colony = colony
+	colony.director = director
+	colony.cards = cards
+	_game_root.add_child(colony)
+	tides = Tides.new()
+	tides.name = "Tides"
+	tides.world = world
+	tides.director = director
+	tides.cards = cards
+	tides.colony = colony
+	_game_root.add_child(tides)
 
 	var layer := CanvasLayer.new()
 	layer.layer = 1
@@ -313,3 +331,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			show_welcome(1)
 		KEY_F6:
 			Game.add_weird(10.0)
+		KEY_F7:
+			colony.arrive("")
+		KEY_F8:
+			tides.turn()

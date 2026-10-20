@@ -5,6 +5,7 @@ class_name Farmer
 ##   sleep / inside / rest   = hidden in the house or sitting on a bench
 ##   nap                     = passed out from exhaustion on the spot (vulnerable)
 ##   fainted                 = health hit 0; costs a doctor's bill
+##   abducted                = taken up by an alien saucer; comes back changed (colony.gd)
 ## Stats (health/energy/mood/poison) live in Game so they persist.
 
 const SPEED := 26.0
@@ -42,6 +43,9 @@ const LINES := {
 	"fence": ["Good fences, good crops.", "Keep those rabbits out!", "A fence. For the vibes."],
 	"thorns": ["Ow! Thorns!", "Brambles bite back!"],
 	"overgrown": ["So... much... grass.", "Grandpa really let this go.", "I can't even see the soil!"],
+	"visit_aliens": ["Hello, neighbours!", "Brought you a turnip!", "Greetings! Er, glorp?"],
+	"sabotage": ["Off my land!", "This is MY farm!", "Take that, space weeds!"],
+	"abducted_back": ["I've seen things...", "They probed my turnips.", "The stars! The STARS!", "How long was I gone?"],
 }
 
 var world  # World
@@ -115,6 +119,11 @@ func update(d: float) -> void:
 			faint_t -= d
 			if faint_t <= 0.0:
 				_recover()
+		"abducted":
+			activity = "Abducted by aliens!"
+			work_t -= d
+			if work_t <= 0.0:
+				_return_from_saucer()
 		"nap":
 			work_t -= d
 			if work_t <= 0.0 or Game.energy > 55.0:
@@ -142,7 +151,7 @@ func update(d: float) -> void:
 		"walk":
 			_walk(d)
 		"work":
-			work_t -= d * speed_mult()
+			work_t -= d * speed_mult() * (1.3 if Game.has_mutation("tentacle") else 1.0)
 			if task.get("kind", "") == "extinguish" and randf() < d * 0.12:
 				hurt(6, "a nasty burn")
 			if work_t <= 0.0:
@@ -186,7 +195,11 @@ func _update_stats(d: float) -> void:
 		Game.health -= 1.0 * d
 		if randf() < d * 0.05:
 			say("Ugh... that snake bite...")
+	if Game.has_mutation("green") and visible_outside() and not Game.is_night() and Game.weather in ["sunny", "heat"]:
+		Game.energy += 0.25 * d
 	var baseline := 75.0 if Game.has_relic("stones") else 60.0
+	if Game.has_mutation("tentacle"):
+		baseline -= 8.0
 	Game.mood += (baseline - Game.mood) * 0.002 * d
 	Game.energy = clampf(Game.energy, 0.0, 100.0)
 	Game.health = clampf(Game.health, 0.0, 100.0)
@@ -281,12 +294,39 @@ func _recover() -> void:
 		say("Doc patched me up. Took pity on my empty chest.", 4.0)
 
 
+## Beamed up by a saucer for a while (colony.gd).
+func abduct(seconds: float) -> void:
+	if state == "fainted":
+		return
+	_drop_carry()
+	task = {}
+	path = []
+	hidden = true
+	state = "abducted"
+	work_t = seconds
+	Game.bump("abductions")
+
+
+func _return_from_saucer() -> void:
+	hidden = false
+	state = "idle"
+	think_t = 1.0
+	var land: Variant = world.colony.random_land_cell() if world.colony else null
+	pos = world.feet(land) if land != null else world.feet(world.DOOR)
+	Game.energy = maxf(Game.energy, 40.0)
+	say_line("abducted_back")
+	if world.colony:
+		world.colony.farmer_returned()
+
+
 func on_click() -> void:
 	if state == "fainted":
 		say("...ugh...")
 		return
 	if state == "nap":
 		say("Wha-? I'm up! I'm up!")
+		return
+	if state == "abducted":
 		return
 	say_line("click")
 	Game.mood = minf(100.0, Game.mood + 1.0)
@@ -490,6 +530,20 @@ func _choose() -> void:
 		if trees.size() > 0:
 			cands.append([24, {"kind": "chop", "cell": world.nearest(trees, me), "adj": true, "dur": 4.0, "tool": "tool_axe"}])
 
+	# the alien village next door: a friendly visit, or (when relations are bad) a bit of sabotage
+	var col: Colony = world.colony
+	if col != null and col.active() and col.has_village() and not Game.is_night():
+		if col.rel() > 30.0 and randf() < 0.12:
+			cands.append([30, {"kind": "visit_aliens", "cell": col.center_cell(), "adj": true, "dur": 2.5}])
+		elif col.hostile() and Game.health > 50.0 and randf() < 0.18:
+			var targets: Array = []
+			for c in col.buildings():
+				if world.obj_type(c) in ["a_moss", "a_pylon", "a_pod", "a_dish"] and _can_reach(c, reach):
+					targets.append(c)
+			if targets.size() > 0:
+				cands.append([34, {"kind": "sabotage", "cell": world.nearest(targets, world.DOOR), "adj": world.is_solid(world.nearest(targets, world.DOOR)),
+					"dur": 3.0, "tool": "tool_hammer"}])
+
 	var wander := Vector2i(clampi(me.x + randi_range(-3, 3), 0, world.COLS - 1), clampi(me.y + randi_range(-3, 3), 0, world.ROWS - 1))
 	if world.is_walkable(wander) and not world.is_house(wander):
 		cands.append([26 if Game.quirk == "dreamer" else 12, {"kind": "wander", "cell": wander, "dur": randf_range(1.0, 3.0)}])
@@ -616,6 +670,8 @@ func _start(t: Dictionary) -> void:
 		"rest", "rest_home": say_line("rest", 0.6)
 		"chop": say_line("chop", 0.3)
 		"pave": say_line("pave", 0.2)
+		"visit_aliens": say_line("visit_aliens", 0.7)
+		"sabotage": say_line("sabotage", 0.8)
 
 
 func _describe(t: Dictionary) -> String:
@@ -643,7 +699,12 @@ func _describe(t: Dictionary) -> String:
 		"demolish": return "Tearing down the %s" % _sname(world.obj_type(c))
 		"pickup": return "Moving the %s" % _sname(world.obj_type(c))
 		"place": return "Placing the %s" % _sname(carrying)
-		"shoo": return "Chasing off a %s" % t["target"].kind
+		"shoo":
+			if t["target"] is Alien:
+				return "Chasing off an alien %s" % t["target"].caste
+			return "Chasing off a %s" % t["target"].kind
+		"visit_aliens": return "Visiting the alien village"
+		"sabotage": return "Wrecking alien stuff"
 		"extinguish": return "Fighting a fire!"
 		"sleep": return "Heading to bed"
 		"shelter": return "Running for shelter!"
@@ -955,6 +1016,13 @@ func _finish() -> void:
 		"wander":
 			if randf() < 0.15 and bubble_t <= 0.0:
 				say_line("idle")
+		"visit_aliens":
+			if world.colony:
+				world.colony.farmer_visited()
+			Game.mood = minf(100.0, Game.mood + 4.0)
+		"sabotage":
+			if world.colony:
+				world.colony.farmer_sabotage(c)
 	_idle()
 
 
@@ -994,8 +1062,13 @@ func draw(ci: CanvasItem) -> void:
 			frame = "farmer_work" if int(anim_t * 4.0) % 2 == 0 else "farmer_idle"
 		"rest":
 			bob = 2.0
+	if Game.has_mutation("green"):
+		mod *= Color(0.72, 1.0, 0.68)
+	if Game.has_mutation("glow") and Game.darkness() > 0.2:
+		ci.draw_circle(pos + Vector2(0, -7), 10.0, Color(0.6, 1.0, 0.6, 0.12 * Game.darkness()))
 	ci.draw_set_transform(pos, 0.0, Vector2(-1.0 if flip else 1.0, 1.0))
 	ci.draw_texture(Art.tex(frame), Vector2(-8, -15 + bob), mod)
+	_draw_mutations(ci, bob)
 	if state == "work" and task.has("tool"):
 		var up := int(anim_t * 4.0) % 2 == 0
 		ci.draw_texture(Art.tex(task["tool"]), Vector2(3, -22 if up else -16))
@@ -1005,10 +1078,32 @@ func draw(ci: CanvasItem) -> void:
 		ci.draw_texture_rect(tx, Rect2(pos.x - 6, pos.y - 30, 12, 12 * tx.get_height() / maxf(1.0, tx.get_width())), false)
 
 
+## Little extras the aliens left him with (drawn in the farmer's local, flipped space).
+func _draw_mutations(ci: CanvasItem, bob: float) -> void:
+	var lime := Color("a7f070")
+	if Game.has_mutation("antenna"):
+		var wob := int(anim_t * 3.0) % 2
+		ci.draw_rect(Rect2(-3, -19 + bob, 1, 4), Color("38b764"))
+		ci.draw_rect(Rect2(2, -19 + bob, 1, 4), Color("38b764"))
+		ci.draw_rect(Rect2(-4 + wob, -20 + bob, 2, 1), lime)
+		ci.draw_rect(Rect2(2 - wob, -20 + bob, 2, 1), lime)
+	if Game.has_mutation("third_eye"):
+		ci.draw_rect(Rect2(-1, -11 + bob, 2, 1), Color("b13e53") if int(anim_t * 0.7) % 4 == 0 else Color("73eff7"))
+	if Game.has_mutation("tentacle"):
+		var sw := sin(anim_t * 4.0)
+		ci.draw_rect(Rect2(5, -6 + bob, 1, 3), lime)
+		ci.draw_rect(Rect2(6 + roundf(sw), -3 + bob, 1, 3), lime)
+		ci.draw_rect(Rect2(7 + roundf(sw), -1 + bob, 1, 1), Color("38b764"))
+	if Game.has_mutation("hive_mind") and int(anim_t * 2.0) % 3 == 0:
+		ci.draw_rect(Rect2(-6, -17 + bob, 1, 1), Color("73eff7"))
+		ci.draw_rect(Rect2(5, -16 + bob, 1, 1), Color("73eff7"))
+
+
 # ---------------------------------------------------------------- save
 func to_dict() -> Dictionary:
 	return {"x": pos.x, "y": pos.y, "carrying": carrying, "carry": carry_data,
-		"sleep": state == "sleep", "fainted": state == "fainted", "faint_t": faint_t}
+		"sleep": state == "sleep", "fainted": state == "fainted", "faint_t": faint_t,
+		"abducted": work_t if state == "abducted" else 0.0}
 
 
 func from_dict(d: Dictionary) -> void:
@@ -1026,3 +1121,5 @@ func from_dict(d: Dictionary) -> void:
 	elif bool(d.get("fainted", false)):
 		state = "fainted"
 		faint_t = float(d.get("faint_t", 20.0))
+	elif float(d.get("abducted", 0.0)) > 0.0:
+		abduct(float(d["abducted"]))

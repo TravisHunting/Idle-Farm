@@ -31,6 +31,27 @@ stranger cards and events.
 On launch a **welcome screen** explains how to play; the player clicks through and picks one of
 **3 save slots** (each autosaves every 20s, and on menu/quit).
 
+## Factions & the anti-equilibrium design (v0.4)
+The long-term goal: the player watches, and guides with a light hand (cards), while systems and
+factions interact, reach out to each other, grow, build, die and keep shifting the balance of power.
+The farm must **never settle into equilibrium**, and the farmer is **never eliminated** (he can be
+changed drastically and lose territory). Three factions compete for the 12x22 farm:
+- **The farm**: the farmer's fields, buildings, paths, chickens, friends.
+- **The aliens** (`colony.gd` + `alien.gd`): arrive by falling egg, saucer, strange visitor or a
+  night lurker that mutates a hen; hatch, grow up into castes (worker/scout/warden/envoy/elder,
+  the oldest elder is the matriarch), build a village (pods, hatchery, glow moss, spire, dish,
+  pylons), spread a creep over claimed land, eat overgrowth, un-till fields, raid, trade, send
+  envoys, abduct (and mutate) the farmer, split in schisms and civil wars, and eventually hear
+  "the call" (all leave, or a second wave arrives). With no aliens around, a new arrival is
+  always on its way.
+- **The wild**: overgrowth and critters (foxes now hunt alien spawnlings; wardens hunt critters).
+- **The tides** (`tides.gd`) measure each faction's share of power every 20s and, every few
+  minutes, knock down a faction that dominated too long (hubris), shake things hard when shares
+  have barely moved (upheaval), or throw a smaller boon/bane (ripple). Farm banes stop below an
+  18% share. Internal feedbacks in the colony (crowding -> aggression/schism/civil war, borders
+  too big to hold falling to ruin, matriarch successions re-rolling temperament, the call home)
+  add their own swings.
+
 ## How to run
 - Open the project in Godot 4.7+ and press Play (main scene `res://scenes/main.tscn`).
 - Running from the editor embeds the game in the editor's Game tab, so the side-docking /
@@ -43,7 +64,14 @@ On launch a **welcome screen** explains how to play; the player clicks through a
   main.gd); the `<`/`>` button flips it to the left.
 - Settings (gear button, top bar): card cadence (1-60 min), window side; saved in `user://settings.json`.
 - Debug keys (only in debug builds): `F1` push a card into the box, `F2` fill the box, `F3` random event,
-  `F4` toggle 10x time speed, `F5` wipe current slot & back to menu, `F6` +10 weirdness.
+  `F4` toggle 10x time speed, `F5` wipe current slot & back to menu, `F6` +10 weirdness,
+  `F7` an alien arrival, `F8` force a turn of the tides.
+- **Headless tests (the default dev loop):**
+  `C:/Dev/Godot/Godot_v4.7.2-stable_win64.exe --headless --path . -s tests/sim_test.gd -- days=8 [seed=N] [verbose]`
+  boots the real game on throwaway slot 9, exercises every alien arrival/card/boon/bane, runs N
+  in-game days and a save/reload, prints a faction report every 12 in-game hours and exits
+  non-zero on failure (~25s per 8 days). After adding a new `class_name` script, run
+  `--headless --path . --import` once to refresh the global class cache.
 - MCP testing tip: `game_manage input_mouse` positions are in *window* pixels (2x the 192x432
   canvas in the editor's embedded view).
 - Export: see "Exporting" below.
@@ -66,6 +94,11 @@ On launch a **welcome screen** explains how to play; the player clicks through a
 | `scripts/farmer.gd` | Farmer AI (utility-scored task picker + state machine), stats, speech, danger handling, faint/recovery. |
 | `scripts/animal.gd` | All critters: crow, rabbit, fox, boar, snake, wasps (threats); chicken, dog, merchant, butterfly, bee, wisp (friendly); relic companions homunculus/goat/cat; card visitors (`kind="visitor"`, `sprite` = card art). |
 | `scripts/director.gd` | Random event scheduler (+ weird events gated by Weirdness), weather cycle, lightning & fire, relic hooks, and the world **actions** card effects call (`do_action`). |
+| `scripts/colony.gd` (class **Colony**) | The alien faction: arrivals, castes on maturity, food/matter economy, eggs, building plans + sites, territory claim and the creep (`World.alien_land`), relations/eras/outreach (envoys, raids, abductions, cards pushed into the box), farmer mutations, crowding/schism/civil war/the call, `boon()`/`bane()`. State in `Game.colony`. |
+| `scripts/alien.gd` (class **Alien** extends Animal) | One alien: caste behaviour (egg, spawn, worker, scout, warden, envoy, elder/matriarch, ship, stranger, lurker, mutant), ageing, hovering straight-line movement, drawing (saucer + beam). Saved with World.animals. |
+| `scripts/tides.gd` (class **Tides**) | Faction power (farm / aliens / wild), share history, hubris / upheaval / ripple turns of fate. State in `Game.tides`. |
+| `scripts/art_alien.gd` | ASCII sprites for every alien caste (2 frames each), matriarch, stranger, lurker, mutant hen, eggs, village buildings, glow moss, husk, ruin, icons. |
+| `tests/sim_test.gd` + `tests/sim_runner.gd` | Headless simulation test (see How to run). |
 | `scripts/hud.gd` | In-game UI: top bar (coins/day/clock/weather, drag, menu/dock/min/close), status strip (HP/energy/mood/weirdness eye/buffs/activity/log), card tray (rarity borders, playable pip, OPEN ALL, relic shelf with tooltips), **choice-card modal**, speech bubbles & floating texts. |
 
 Logical resolution 192x432 (viewport stretch, integer scale, nearest filter). Layout:
@@ -180,6 +213,24 @@ Key systems added in v0.3:
 - [ ] Dedicated sprites for the townsfolk (they reuse the villager sprite with a tint)
 - [ ] Drag-and-drop not click-tested with real mouse drags yet (logic tested via game_eval)
 
+### v0.4: the alien faction + the tides
+- [x] Headless-first dev model recorded in AGENTS.md / CLAUDE.md; `tests/sim_test.gd` harness
+- [x] Alien sprites: 9 castes/forms x 2 frames, matriarch, eggs (+hatching), 6 buildings, moss, husk, ruin, icons
+- [x] Arrivals: falling egg, saucer drop, strange visitor (founds a village, reveals himself), night lurker -> mutant hen
+- [x] Life cycle: egg -> spawnling -> caste chosen by colony need -> elder -> matriarch -> death (husk); hunger deaths
+- [x] Village building: worker jobs (build sites, moss harvest, clearing), pods/hatchery/moss/spire/dish/pylons
+- [x] Territory: claim radii, creep spreads/recedes, absorbs overgrowth, un-tills fields, mutates crops, never touches the farmhouse core
+- [x] Relations & outreach: envoys (gift/trade/demand/chat), raids, warden zaps, abductions (even from bed), farmer visits/sabotage, envoy + ultimatum cards
+- [x] Farmer mutations (antenna, green skin, third eye, glow, tentacle arm, hive whispers) with drawn overlays and effects; Doc Hollis can cure
+- [x] Interactions with existing systems: lightning loves the spire, fire burns pods, boars smash buildings, foxes hunt spawnlings, wardens hunt critters
+- [x] Tides: hubris / upheaval / ripple; colony crowding, schisms, civil wars, border decay, matriarch succession, the call home
+- [x] 13 alien cards (arrivals, diplomacy, borders, spores, bazaar, plague, tractor beam, join the hive, rash)
+- [x] HUD: alien + mutation status icons; farmer panel shows the village, relations, food/matter, mutations, tide shares
+- [x] Verified headless: every arrival/card/boon/bane, 4 seeds x 24 days (shares swing, up to 4 villages rise and fall per run), save/reload
+- [ ] UI pass via MCP: click-through of the farmer panel with a live colony; card modals for the alien cards
+- [ ] Balance: established colonies hover around 40-55% share between swings; farmer mutations are rare without cards
+- [ ] Rival alien colonies (a schism could found a second village with its own temper)
+
 ## Next up / ideas (not started)
 - [ ] Balance pass on the deck (reward sizes vs. level scaling; how fast weirdness climbs)
 - [ ] More follow-up chains (tome -> ritual -> ?, the homunculus grows up, the stranger's contract)
@@ -211,6 +262,13 @@ Key systems added in v0.3:
   variable an explicit type instead of `:=`.
 
 ## Changelog
+- 2026-10-21 - v0.4: the alien faction and the tides. New `colony.gd`, `alien.gd`, `tides.gd`,
+  `art_alien.gd`; hooks in world (creep, solid buildings, save), farmer (abduction, mutations,
+  visits/sabotage), director (spire lightning, burning pods, glow vs foxes), animals (foxes hunt
+  spawnlings, boars smash pods), cards (alien requirements/effects), deck (13 cards), HUD, main
+  (F7/F8). Fixed an old bug: a fox that was scared off still killed the chicken it had only
+  targeted. Default dev loop is now headless (`tests/sim_test.gd`); 0 script errors over 4 seeds
+  x 24 days.
 - 2026-10-18 — Project started; handoff doc written.
 - 2026-10-18 — v0.1 built and verified via Godot MCP: clean runs (no runtime errors), all 19 cards
   and all 10 random events exercised, faint/recovery, storm + lightning + fire, save -> reload, and a

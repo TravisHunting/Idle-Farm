@@ -23,6 +23,9 @@ class_name Deck
 ##   ["paths", n]   ["pond"]   ["quirk", id]   ["weather", w]   ["night"]   ["day_time"]   ["level", n]
 ##   ["weird", n]   ["mood", n]   ["health", n]   ["chickens", n]   ["tilled", n]   ["charms", n]
 ##   ["stat", name, n]   ["inventory", n] (any produce)   ["item", id, n]   ["treasure", id, n]   ["wealth", n]
+##   Aliens (colony.gd): ["aliens", n] population   ["no_aliens"]   ["alien_rel", n] relations >= n
+##   ["alien_rel_below", n]   ["alien_land", n] creep tiles   ["alien_building", type]
+##   ["mutation", id]   ["no_mutation", id]   ["mutations", n] (Game.MUTATIONS)
 ##
 ## Effects:
 ##   There is no money. Rewards go in the farmer's chest; a "cost" is always a consequence on the farm.
@@ -39,6 +42,10 @@ class_name Deck
 ##   Farm-shaping: ["clear", n|-1] overgrowth   ["overgrow", n]   ["field", shape, crop|"mixed"|"none", max]
 ##   ["path", n]   ["fence", n]   ["build", struct, n]   ["demolish", struct, n?]   ["trees", n]   ["pond", size]
 ##   ["perk", id]   ["lose_perk", id]   ["friend", id]   ["lose_friend", id]   ["totem", n] (- = lose)
+##   Aliens: ["alien", op, arg] with op: arrive (egg|saucer|stranger|lurker|"" any)   rel n   aggro n
+##   food n   matter n   cede n (creep takes n tiles + a pylon)   reclaim n (creep pulls back, a
+##   border building falls)   abduct (the farmer, for a while)   mutate id|""   cure   burn_moss
+##   delay secs (next arrival)   gift   boon kind|""   bane kind|"" (see Colony.boon/bane)
 ## Field shapes: see World.SHAPES ("" = farmer's whim). Perks: Game.PERKS. Friends: Game.FRIENDS.
 ## Buff names: sun (2x growth), growth (1.5x), dog, bounty, crow_truce, boar_guard, favor
 ## Time: one in-game day is 480s.
@@ -522,4 +529,62 @@ const CARDS := [
 		"text": "All six totems turn to face the altar. The ground breathes in. Something beneath the farm opens one eye.",
 		"a": {"label": "Kneel", "desc": "A hoard of gems, every crop ripens, a smiling starfruit field.", "req": [], "fx": [["trinkets", 3000], ["ripen", -1], ["unlock", "starfruit"], ["field", "smiley", "starfruit"], ["weird", 30], ["log", "Something vast smiles beneath the farm."]]},
 		"b": {"label": "Banish It", "desc": "The totems crumble. -50 weird. The farm is just a farm.", "req": [], "fx": [["totem", -6], ["demolish", "altar"], ["weird", -50], ["mood", 50], ["charm", 5]]}},
+	# ======================================================= THE ALIENS (colony.gd)
+	# arrivals: the player can invite them in, or put them off for a while
+	{"id": "lights_over_field", "title": "Lights Over the Field", "art": "saucer", "rarity": 2, "level": 1, "weird": 0,
+		"needs": [["no_aliens"], ["day", 2]],
+		"text": "Three lights hang over the bottom field, very still. Then they blink. Twice. Like a question.",
+		"a": {"label": "Blink Back", "desc": "Flash the lantern back. A saucer comes down: friendly.", "req": [], "fx": [["alien", "arrive", "saucer"], ["alien", "rel", 30], ["weird", 3]]},
+		"b": {"label": "Draw the Curtains", "desc": "Nobody's home. No visitors for 2 days. +2 Lucky Charms.", "req": [], "fx": [["alien", "delay", 960], ["charm", 2]]}},
+	{"id": "warm_egg", "title": "A Warm Egg", "art": "a_egg", "rarity": 2, "level": 1, "weird": 5, "needs": [["no_aliens"]],
+		"text": "In the furrow: an egg the size of a pumpkin. It is warm. It hums. It is not a chicken's.",
+		"a": {"label": "Keep It Warm", "desc": "Wrap it in grandpa's scarf. Something will hatch.", "req": [], "fx": [["alien", "arrive", "egg"], ["alien", "rel", 25], ["weird", 3]]},
+		"b": {"label": "Sell It", "desc": "A collector pays handsomely. The sky seems to frown.", "req": [], "fx": [["trinkets", 160], ["alien", "aggro", 0.3], ["alien", "delay", 480]]}},
+	{"id": "odd_stranger", "title": "An Odd Stranger", "art": "a_stranger1", "rarity": 2, "level": 1, "weird": 0, "needs": [["no_aliens"], ["day", 3]],
+		"text": "A man in a long coat is asking about land for sale. He blinks sideways.",
+		"a": {"label": "Sell Him a Corner", "desc": "He settles at the edge of the farm. A pearl for your trouble.", "req": [], "fx": [["alien", "arrive", "stranger"], ["loot", "pearl", 1]]},
+		"b": {"label": "Not For Sale", "desc": "He tips his hat and leaves. Something follows him in at night...", "req": [], "fx": [["alien", "arrive", "lurker"], ["mood", 5]]}},
+	{"id": "coop_noises", "title": "Noises in the Coop", "art": "a_lurker1", "rarity": 2, "level": 2, "weird": 5, "needs": [["no_aliens"], ["chickens", 1]],
+		"text": "The hens won't settle. Something low and many-legged was seen near the coop.",
+		"a": {"label": "Lamp by the Coop", "desc": "A lamp post goes up. Whatever it is stays away for 3 days.", "req": [], "fx": [["build", "lamp", 1], ["alien", "delay", 1440]]},
+		"b": {"label": "Let It Come", "desc": "Leave the coop door open tonight. See what happens.", "req": [], "fx": [["alien", "arrive", "lurker"], ["weird", 4]]}},
+	# outreach: the colony pushes these into the box itself
+	{"id": "alien_envoy", "title": "The Envoy", "art": "a_envoy1", "rarity": 0,
+		"text": "A robed alien bows very low (it has no knees). 'Farmer. The hive would speak with you.'",
+		"a": {"label": "Shake Hands", "desc": "A treaty of sorts. Relations +25 and a gift from the stars.", "req": [], "fx": [["alien", "rel", 25], ["alien", "gift"]]},
+		"b": {"label": "Trade Seeds", "desc": "Give 3 crops; the hive sends shinies and grows stronger.", "req": [], "fx": [["take_crop", "", 3], ["alien", "food", 25], ["trinkets", 120], ["alien", "rel", 10]]}},
+	{"id": "alien_ultimatum", "title": "Ultimatum", "art": "a_warden1", "rarity": 0,
+		"text": "Wardens line the edge of the creep. One holds up a sign: GIVE LAND. Very good handwriting.",
+		"a": {"label": "Give Them Land", "desc": "Cede 6 tiles. Peace, for now: relations +35.", "req": [], "fx": [["alien", "cede", 6], ["alien", "rel", 35], ["alien", "aggro", -0.3]]},
+		"b": {"label": "Stand Firm", "desc": "Fences go up and the creep is pushed back. They won't like it.", "req": [], "fx": [["alien", "reclaim", 6], ["fence", 6], ["alien", "rel", -15]]}},
+	# living next door
+	{"id": "border_dispute", "title": "Border Dispute", "art": "a_pylon", "rarity": 2, "level": 1, "weird": 0, "needs": [["aliens", 3], ["alien_land", 10]],
+		"text": "The purple creep has reached the turnips. The aliens insist it was always there.",
+		"a": {"label": "Good Neighbours", "desc": "Let them have the strip. Relations +20, 2 alien bolts.", "req": [], "fx": [["alien", "cede", 4], ["alien", "rel", 20], ["loot", "alien_bolt", 2]]},
+		"b": {"label": "Dig a Ditch", "desc": "Push the creep back with a pond on the border. Relations -20.", "req": [], "fx": [["alien", "reclaim", 8], ["pond", 3], ["alien", "rel", -20]]}},
+	{"id": "glowing_spores", "title": "Glowing Spores", "art": "a_moss", "rarity": 2, "level": 1, "weird": 0, "needs": [["aliens", 2]],
+		"text": "Fat glowing spores drift over from the alien village and settle in the fields.",
+		"a": {"label": "Let Them Settle", "desc": "3 crops turn to glowshrooms; the hive grows fat on the rest.", "req": [], "fx": [["mutate", 3, "glowshroom"], ["alien", "food", 30], ["alien", "rel", 10]]},
+		"b": {"label": "Burn the Moss", "desc": "Torch every patch of glow moss. The hive goes hungry. Angrily.", "req": [], "fx": [["alien", "burn_moss"], ["alien", "rel", -25], ["mood", 5]]}},
+	{"id": "alien_bazaar", "title": "Alien Bazaar", "art": "a_pod", "rarity": 2, "level": 1, "weird": 0, "needs": [["aliens", 4], ["alien_rel", 10]],
+		"text": "Market day in the alien village! The stalls hover. The prices are in colours.",
+		"a": {"label": "Sell Produce", "desc": "All produce traded at 2.5x. The hive eats well.", "req": [["inventory", 1]], "fx": [["sell", 2.5], ["alien", "food", 20], ["alien", "rel", 5]]},
+		"b": {"label": "Buy a Gadget", "desc": "6 ore and an alien gift. Relations +10.", "req": [], "fx": [["item", "ore", 6], ["alien", "gift"], ["alien", "rel", 10]]}},
+	{"id": "sick_colony", "title": "Sick Colony", "art": "a_elder1", "rarity": 2, "level": 1, "weird": 0, "needs": [["aliens", 5]],
+		"text": "The aliens are coughing (in colours). The glow over the village is dim and wobbly.",
+		"a": {"label": "Send Soup", "desc": "Betty's recipe, by the bucket. They recover: relations +30.", "req": [], "fx": [["alien", "food", 20], ["alien", "rel", 30], ["energy", -20]]},
+		"b": {"label": "Quarantine", "desc": "Fences up, and wait. The plague runs its course.", "req": [], "fx": [["alien", "bane", "plague"], ["fence", 8], ["alien", "rel", -10]]}},
+	{"id": "tractor_beam", "title": "Tractor Beam", "art": "saucer", "rarity": 3, "level": 1, "weird": 10, "needs": [["aliens", 4]],
+		"text": "A column of light lands right on the farmer's boots. It tickles. It is clearly an invitation.",
+		"a": {"label": "Go Willingly", "desc": "He'll be back. Changed. Relations +30.", "req": [], "fx": [["alien", "abduct"], ["alien", "rel", 30]]},
+		"b": {"label": "Hide Under the Bed", "desc": "They are offended. Relations -15, but +2 Lucky Charms.", "req": [], "fx": [["alien", "rel", -15], ["charm", 2], ["mood", -10]]}},
+	{"id": "hive_offer", "title": "Join the Hive?", "art": "a_queen1", "rarity": 3, "level": 1, "weird": 20, "once": true,
+		"needs": [["aliens", 6], ["alien_rel", 40]],
+		"text": "The matriarch extends a glowing tendril. 'Share our larder. Share our song. Be one of us.'",
+		"a": {"label": "Become One", "desc": "Hive Whispers: one larder for farm and hive. No more raids.", "req": [], "fx": [["alien", "mutate", "hive_mind"], ["alien", "rel", 40], ["alien", "boon", "golden"]]},
+		"b": {"label": "Politely Decline", "desc": "She is gracious about it. A parting gift fills the chest.", "req": [], "fx": [["trinkets", 220], ["alien", "rel", -5]]}},
+	{"id": "funny_rash", "title": "A Funny Rash", "art": "r_mutation", "rarity": 2, "level": 1, "weird": 0, "needs": [["mutations", 1]],
+		"text": "The farmer's new 'feature' itches. Also it hums. Also it has opinions.",
+		"a": {"label": "See the Doctor", "desc": "One mutation is cured. Doc doesn't ask questions.", "req": [], "fx": [["alien", "cure"], ["heal", 20]]},
+		"b": {"label": "Embrace It", "desc": "Lean in: another mutation, +15 mood, the farm gets weirder.", "req": [], "fx": [["alien", "mutate"], ["mood", 15], ["weird", 5]]}},
 ]

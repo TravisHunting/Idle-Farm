@@ -17,6 +17,8 @@ func _draw() -> void:
 		var y: float = a.pos.y
 		if a.kind in ["crow", "butterfly", "bee"]:
 			y += 20.0  # flyers draw above things around them
+		elif a is Alien and a.caste == "ship":
+			y += 1000.0
 		items.append([y, "animal", a])
 	items.sort_custom(func(a, b): return a[0] < b[0])
 	for it in items:
@@ -47,6 +49,9 @@ func _draw_obj(c: Vector2i) -> void:
 		return
 	if t == "totem":
 		mod = mod.lerp(Color(1.0, 0.7, 1.0), 0.5 + 0.5 * sin(world._anim_t * 2.0 + c.x))
+	if t in ["a_spire", "a_pylon", "a_moss", "a_husk"] and Game.darkness() > 0.3:
+		var r := 9.0 if t == "a_spire" else 6.0
+		draw_circle(world.center(c) + Vector2(0, -4), r, Color(0.45, 1.0, 0.8, 0.10 * Game.darkness()))
 	_draw_sprite(c, _tex_name(o), mod)
 
 
@@ -82,6 +87,8 @@ func _tex_name(o: Dictionary) -> String:
 	var t: String = o.get("type", "")
 	if t == "tree":
 		return "tree_apple" if o.get("apple", false) else "tree"
+	if t == "a_moss":
+		return "a_moss" if float(o.get("g", 0.0)) >= 1.0 else "a_moss_young"
 	return t
 
 

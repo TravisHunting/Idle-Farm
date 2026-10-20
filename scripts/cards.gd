@@ -192,6 +192,30 @@ func check(r: Array) -> Array:
 		"item":
 			var have := Game.item_count(r[1])
 			return [have >= int(r[2]), "%d %s (%d)" % [r[2], Game.ITEM_NAMES.get(r[1], r[1]), have]]
+		# ---- the alien colony (colony.gd)
+		"aliens":
+			var ap: int = world.colony.population() if world.colony else 0
+			return [ap >= int(r[1]), "%d aliens on the farm (%d)" % [r[1], ap]]
+		"no_aliens":
+			var none: bool = world.colony == null or (not world.colony.active() and world.colony.population() == 0)
+			return [none, "no aliens around"]
+		"alien_rel":
+			var rv := int(world.colony.rel()) if world.colony else 0
+			return [rv >= int(r[1]), "alien relations %+d (%+d)" % [r[1], rv]]
+		"alien_rel_below":
+			var rv2 := int(world.colony.rel()) if world.colony else 0
+			return [rv2 < int(r[1]), "alien relations below %+d (%+d)" % [r[1], rv2]]
+		"alien_land":
+			var al: int = world.alien_land.size()
+			return [al >= int(r[1]), "%d tiles of alien creep (%d)" % [r[1], al]]
+		"alien_building":
+			return [world.count_obj(r[1]) > 0, "an alien %s" % Colony.BUILDINGS.get(r[1], {}).get("name", r[1])]
+		"mutation":
+			return [Game.has_mutation(r[1]), "the farmer's %s" % String(Game.MUTATIONS[r[1]]["name"]).to_lower()]
+		"no_mutation":
+			return [not Game.has_mutation(r[1]), "no %s" % String(Game.MUTATIONS[r[1]]["name"]).to_lower()]
+		"mutations":
+			return [Game.mutations.size() >= int(r[1]), "%d mutation%s (%d)" % [r[1], "" if int(r[1]) == 1 else "s", Game.mutations.size()]]
 	return [true, ""]
 
 
@@ -497,6 +521,57 @@ func _apply_one(e: Array) -> void:
 			else:
 				for i in -int(e[1]):
 					_lose_totem()
+		"alien":
+			_alien_fx(e)
+
+
+## ["alien", op, arg]: steer the alien colony (colony.gd).
+func _alien_fx(e: Array) -> void:
+	var col: Colony = world.colony
+	if col == null:
+		return
+	var arg: Variant = e[2] if e.size() > 2 else null
+	match String(e[1]):
+		"arrive":
+			col.arrive(String(arg) if arg != null else "")
+		"rel":
+			col.change_rel(float(arg))
+		"aggro":
+			Game.colony["aggro"] = clampf(float(Game.colony.get("aggro", 0.5)) + float(arg), 0.0, 1.0)
+		"food":
+			col.add_food(float(arg))
+		"matter":
+			Game.colony["matter"] = float(Game.colony.get("matter", 0.0)) + float(arg)
+		"cede":
+			var n := col.cede(int(arg))
+			if n > 0:
+				Game.add_log("%d tiles of the farm now belong to the aliens." % n)
+		"reclaim":
+			var n2 := col.reclaim(int(arg))
+			Game.add_log("The creep pulls back (%d tiles)." % n2)
+		"abduct":
+			if world.farmer:
+				world.farmer.abduct(randf_range(60.0, 140.0))
+				Game.add_log("The farmer floated up into the light...")
+		"mutate":
+			var m := col.mutate_farmer(String(arg) if arg != null else "")
+			if m != "":
+				Game.add_log("The farmer changed: %s. %s" % [Game.MUTATIONS[m]["name"], Game.MUTATIONS[m]["desc"]])
+		"cure":
+			col.cure_farmer()
+		"burn_moss":
+			var moss: Array = world.cells_with_obj(["a_moss"])
+			for c in moss:
+				director.ignite(c)
+			Game.add_log("The glow moss goes up in flames (%d patches)." % moss.size())
+		"delay":
+			Game.colony["arrive_t"] = float(Game.colony.get("arrive_t", 0.0)) + float(arg)
+		"gift":
+			col.envoy_arrived_gift()
+		"boon":
+			col.boon(String(arg) if arg != null else "")
+		"bane":
+			col.bane(String(arg) if arg != null else "")
 
 
 func _spawn(kind: String) -> void:
@@ -749,6 +824,8 @@ func _on_new_day(_d: int) -> void:
 		Game.add_log("The saucer's hull flaked off 2 ore.")
 	if Game.has_relic("horseshoe"):
 		Game.charms = mini(5, Game.charms + 1)
+	if Game.has_mutation("third_eye"):
+		Game.add_weird(1.0)
 	if Game.has_relic("cursed_coin"):
 		var got: Dictionary = Game.gain_trinkets(Game.scaled_reward(20))
 		Game.mood = maxf(0.0, Game.mood - 10.0)
@@ -784,6 +861,8 @@ func friends_visit() -> void:
 			"doc":
 				Game.health = minf(100.0, Game.health + 25.0)
 				Game.poison = 0.0
+				if not Game.mutations.is_empty() and randf() < 0.2 and world.colony:
+					world.colony.cure_farmer()
 	if k > 0:
 		Game.add_log("The townsfolk dropped by (%d)." % k)
 

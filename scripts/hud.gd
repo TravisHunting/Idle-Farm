@@ -30,7 +30,7 @@ const C_WOOD := Color("c28a5a")
 const C_SHADOW := Color(0, 0, 0, 0.6)
 
 const MODAL := Rect2(6, 106, 180, 258)
-const PANEL := Rect2(6, 20, 180, 200)
+const PANEL := Rect2(6, 20, 180, 228)
 
 var world: World
 var director: Node
@@ -556,7 +556,43 @@ func _draw_farmer_panel() -> void:
 				break
 			draw_texture(Art.tex(Game.RELICS[id]["icon"]), Vector2(rx, y))
 			rx += 9
+	y += 11
+	_draw_faction_lines(x, y)
 	_txt("CLICK THE FARM TO CLOSE", Vector2(x, PANEL.end.y - 9), C_DIM)
+
+
+## The aliens next door, what they did to the farmer, and who the tides favour.
+func _draw_faction_lines(x: float, y: float) -> void:
+	var col: Colony = world.colony
+	if col == null:
+		return
+	_txt("ALIENS", Vector2(x, y), C_GREEN)
+	if col.active():
+		var r := int(col.rel())
+		var rc := C_GREEN if r >= 20 else (C_RED if r < -30 else C_GOLD)
+		var rs := "RELATIONS %+d" % r
+		_txt(rs, Vector2(PANEL.end.x - 6 - Art.text_width(rs), y), rc)
+	y += 7
+	for line in Art.wrap(col.status_line(), 42):
+		_txt(line, Vector2(x, y), C_TEXT)
+		y += 7
+	if col.active():
+		_txt("FOOD %d  MATTER %d  BORN %d  DIED %d" % [int(Game.colony["food"]), int(Game.colony["matter"]),
+			int(Game.colony["born"]), int(Game.colony["died"])], Vector2(x, y), C_DIM)
+		y += 7
+	if not Game.mutations.is_empty():
+		var names: Array = []
+		for id in Game.mutations:
+			names.append(String(Game.MUTATIONS[id]["name"]).to_upper())
+		for line in Art.wrap("MUTATIONS: " + ", ".join(names), 42):
+			_txt(line, Vector2(x, y), C_PURPLE)
+			y += 7
+	var tides = main.tides if main else null
+	if tides:
+		y += 2
+		for line in Art.wrap("TIDES: " + tides.status_line(), 42):
+			_txt(line, Vector2(x, y), Color("73eff7"))
+			y += 7
 
 
 # ---------------------------------------------------------------- bars
@@ -601,6 +637,10 @@ func _draw_status() -> void:
 	var icons: Array = []
 	if Game.totems > 0:
 		icons.append(["r_totem", "%d" % Game.totems])
+	if world and world.colony and world.colony.active():
+		icons.append(["r_alien", str(world.colony.population())])
+	if not Game.mutations.is_empty():
+		icons.append(["r_mutation", ""])
 	if Game.buff("sun"):
 		icons.append(["sunny", ""])
 	if Game.buff("growth"):

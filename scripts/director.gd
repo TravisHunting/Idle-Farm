@@ -16,11 +16,13 @@ const WEATHER_DUR := {
 	"sunny": Vector2(120, 240), "cloudy": Vector2(60, 120), "rain": Vector2(50, 100),
 	"storm": Vector2(35, 70), "heat": Vector2(70, 140),
 }
-const FLAMMABLE := ["fence", "flowerbed", "bench", "sign", "scarecrow", "beehive", "tree", "weed", "stump", "coop"]
+const FLAMMABLE := ["fence", "flowerbed", "bench", "sign", "scarecrow", "beehive", "tree", "weed", "stump", "coop",
+	"a_pod", "a_hatchery", "a_moss", "a_dish"]
 
 var world: World
 var weather_fx: Node2D
 var cards: Node
+var colony: Colony
 var weather_t := 90.0
 var event_t := 25.0
 var bolt_t := 6.0
@@ -88,9 +90,16 @@ func set_weather(w: String, dur: float = -1.0) -> void:
 func lightning(force_cell: Variant = null) -> void:
 	var c: Vector2i
 	var rods: Array = world.cells_with_obj(["rod", "obelisk"])
+	var spires: Array = world.cells_with_obj(["a_spire"])
 	var f := world.farmer
 	if force_cell != null:
 		c = force_cell
+	elif spires.size() > 0 and randf() < 0.35:
+		# the alien spire drinks lightning
+		c = spires[0]
+		Game.add_log("Lightning hits the alien spire. It crackles and glows brighter.")
+		if colony:
+			colony.spire_struck()
 	elif rods.size() > 0 and randf() < 0.85:
 		c = rods[0]
 		if world.obj_type(c) == "obelisk":
@@ -106,7 +115,7 @@ func lightning(force_cell: Variant = null) -> void:
 		weather_fx.strike(world.center(c))
 	shake.emit(2.0)
 	world.puff(world.center(c), Color("ffcd75"), 12, 30.0)
-	if world.obj_type(c) in ["rod", "obelisk"]:
+	if world.obj_type(c) in ["rod", "obelisk", "a_spire"]:
 		return
 	if f != null and f.visible_outside() and f.pos.distance_to(world.feet(c)) < 20.0:
 		f.hurt(25, "a lightning strike")
@@ -119,7 +128,7 @@ func ignite(c: Vector2i) -> void:
 	if not world.in_bounds(c) or world.is_house(c):
 		return
 	var t := world.obj_type(c)
-	if t in ["fire", "bin", "rod", "well", "idol", "obelisk", "stones", "saucer"] or t in World.MYSTERY:
+	if t in ["fire", "bin", "rod", "well", "idol", "obelisk", "stones", "saucer", "a_spire", "a_pylon", "a_ruin"] or t in World.MYSTERY:
 		return
 	var flammable := world.crops.has(c) or t in FLAMMABLE
 	if not flammable:
@@ -159,6 +168,11 @@ func _tick_fires() -> void:
 			var under: Dictionary = o.get("under", {})
 			if not under.is_empty() and Game.STRUCTS.has(under.get("type", "")):
 				Game.add_log("The %s burned down." % Game.STRUCTS[under["type"]]["name"])
+			elif not under.is_empty() and String(under.get("type", "")).begins_with("a_") and colony:
+				Game.add_log("An alien %s burned down!" % Colony.BUILDINGS.get(under["type"], {}).get("name", "building"))
+				for a in world.animals:
+					if a is Alien and not a.dead and a.pos.distance_to(world.feet(c)) < 10.0 and randf() < 0.5:
+						a.die("fire")
 			world.remove_obj(c)
 			world.crops.erase(c)
 			world.place_obj(c, "ash")
@@ -181,7 +195,7 @@ func random_event(force: String = "") -> void:
 		if not Game.has_relic("crow_crown") and not Game.buff("crow_truce"):
 			ev["crows"] = 10
 		ev["rabbits"] = 6
-	if (Game.is_evening() or Game.is_night()) and not Game.has_relic("lantern") and Game.day >= 2:
+	if (Game.is_evening() or Game.is_night()) and not Game.has_relic("lantern") and not Game.has_mutation("glow") and Game.day >= 2:
 		ev["fox"] = 5
 	if lv >= 2 and not Game.buff("boar_guard"):
 		ev["boar"] = 3
