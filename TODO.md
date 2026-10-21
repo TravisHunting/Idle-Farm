@@ -62,7 +62,12 @@ changed drastically and lose territory). Four factions compete for the 12x22 far
 - **The tides** (`tides.gd`) measure each faction's share of power every 20s and, every few
   minutes, knock down a faction that dominated too long (hubris), shake things hard when shares
   have barely moved (upheaval), or throw a smaller boon/bane (ripple). Farm banes stop below an
-  18% share. Internal feedbacks in the colony (crowding -> aggression/schism/civil war, borders
+  18% share. **Cataclysms** (rolled every 1-2.5 days, aimed mostly at the strongest faction,
+  more often when the balance is stale) can wipe a faction out completely: a hive-sickness or a
+  homeworld recall (aliens), the long frost (brood), the scorching (all wild burned off, critters
+  silent for 1-2 days), the dark harvest (every field, crop, building and hen; the farmer alone
+  survives in his house). Every faction can come back; extinctions and returns are logged and
+  counted in `Game.tides.extinct`. Internal feedbacks in the colony (crowding -> aggression/schism/civil war, borders
   too big to hold falling to ruin, matriarch successions re-rolling temperament, the call home)
   add their own swings.
 
@@ -79,7 +84,8 @@ changed drastically and lose territory). Four factions compete for the 12x22 far
 - Settings (gear button, top bar): card cadence (1-60 min), window side; saved in `user://settings.json`.
 - Debug keys (only in debug builds): `F1` push a card into the box, `F2` fill the box, `F3` random event,
   `F4` toggle 10x time speed, `F5` wipe current slot & back to menu, `F6` +10 weirdness,
-  `F7` an alien arrival, `F8` force a turn of the tides, `F9` a brood arrival, `F10` a locust swarm.
+  `F7` an alien arrival, `F8` force a turn of the tides, `F9` a brood arrival, `F10` a locust swarm,
+  `F11` a random cataclysm.
 - **Headless tests (the default dev loop):**
   `C:/Dev/Godot/Godot_v4.7.2-stable_win64.exe --headless --path . -s tests/sim_test.gd -- days=8 [seed=N] [verbose]`
   boots the real game on throwaway slot 9, exercises every alien arrival/card/boon/bane, runs N
@@ -262,6 +268,12 @@ Key systems added in v0.3:
 - [x] Brood caps + crowding: max 40 insects / 6 mounds / 4 queens, queen duels, great migrations (half leave, a mound is abandoned)
 - [ ] Balance: aliens now tend to stay small (max 9-20) and die out often against the brood; the water cap (48) is reached in long runs
 
+### v0.6: cataclysms and extinctions
+- [x] Cataclysm tier in the tides: each faction can be wiped out entirely (aliens, brood, wild, farm down to the farmer + house)
+- [x] Extinction / return tracking with log lines; farmer panel shows who has been wiped out and how often
+- [x] Comebacks: re-arrivals, wild floods back after the silence, the farmer breaks new ground
+- [x] Verified headless: forced cataclysms wipe each faction and both the farm and the wild return; long natural runs (see changelog)
+
 ## Next up / ideas (not started)
 - [ ] Balance pass on the deck (reward sizes vs. level scaling; how fast weirdness climbs)
 - [ ] More follow-up chains (tome -> ritual -> ?, the homunculus grows up, the stranger's contract)
@@ -293,6 +305,11 @@ Key systems added in v0.3:
   variable an explicit type instead of `:=`.
 
 ## Changelog
+- 2026-10-21 - v0.6: cataclysms. The tides can now wipe any faction out completely (hive-sickness /
+  recall, the long frost, the scorching, the dark harvest), aimed mostly at the dominant faction;
+  extinctions and returns are tracked and logged, the wild falls silent and then floods back, and
+  the farmer always survives to start again. F11 forces one. New test section + natural-run check
+  that at least two factions get wiped out in 12+ days.
 - 2026-10-21 - v0.5: the Brood, a mutant insect faction (`swarm.gd`, `insect.gd`, `art_insect.gd`)
   that reshapes the map (mounds, tunnels, webs, wax walls, locust-stripped bare ground, sinkhole
   ponds) and has its own relations with the farm and the aliens (pollination, raids, war fronts,

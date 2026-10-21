@@ -222,6 +222,10 @@ func random_event(force: String = "") -> void:
 		ev["whispers"] = 2
 	if w >= 35 and Game.is_night():
 		ev["abduction"] = 2
+	if Game.buff("silent_wild"):
+		# after the scorching: no critters, no weeds, nothing wild at all
+		for k in ["crows", "rabbits", "fox", "boar", "snake", "wasps", "butterflies", "weeds"]:
+			ev.erase(k)
 	var pick := force
 	if pick == "":
 		var total := 0

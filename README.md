@@ -47,7 +47,10 @@ every morning, a new ability for the farmer... or a fleshy book that whispers at
   fields, spin webs across the paths, strip whole stripes of the farm bare, pollinate (or eat) the
   crops, go to war with the aliens, and when it rains the tunnels cave in into brand new ponds.
 - **It never settles down.** The farm, the aliens, the bugs and the wild compete for the land, and
-  the tides knock down whoever gets too comfortable.
+  the tides knock down whoever gets too comfortable. Now and then a cataclysm wipes a whole side
+  out: a plague in the alien village, a killing frost for the bugs, a summer that scorches the
+  wild bare, or a dark harvest that leaves the farmer with nothing but his house. Everyone comes
+  back, eventually.
 - **Plays nicely in the background.** Borderless, always on top, docks to either screen edge,
   three save slots that save themselves, and progress keeps ticking while you're away.
 
@@ -99,5 +102,5 @@ Saves live in `%APPDATA%/Godot/app_userdata/IdleFarm/` on Windows.
   mini-language. Adding a card is a single dictionary entry.
 - Debug keys (debug builds only): `F1` new card, `F2` fill the box, `F3` random event,
   `F4` 10x speed, `F5` wipe the current slot, `F6` +10 weirdness, `F7` alien arrival, `F8` turn the tides,
-  `F9` giant insects, `F10` locust swarm.
+  `F9` giant insects, `F10` locust swarm, `F11` cataclysm.
 - Headless simulation test: `Godot_v4.7.2-stable_win64.exe --headless --path . -s tests/sim_test.gd -- days=8`.

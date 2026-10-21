@@ -349,3 +349,5 @@ func _unhandled_input(event: InputEvent) -> void:
 			swarm.arrive("")
 		KEY_F10:
 			swarm.launch_swarm("")
+		KEY_F11:
+			tides.roll_cataclysm(["aliens", "insects", "wild", "farm"].pick_random())

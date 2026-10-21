@@ -4,6 +4,7 @@ extends Node
 ##   1. every alien arrival method, every caste, every boon/bane and every alien card choice
 ##   1b. the Brood: every insect arrival, the life cycle, swarms, sinkholes, webs, the war with
 ##       the aliens, every boon/bane and every insect card choice
+##   1c. cataclysms: each faction can be wiped out completely, and comes back
 ##   2. a long natural run: the colony + tides left alone for many in-game days, sampled hourly
 ##   3. a save -> reload round trip
 ## Run (from the project folder):
@@ -45,6 +46,7 @@ func _run() -> void:
 	_test_cards()
 	_test_swings()
 	_test_brood()
+	_test_cataclysms()
 	_reset_aliens()
 	_test_natural_run()
 	await _test_save_roundtrip()
@@ -129,6 +131,7 @@ func _reset_aliens() -> void:
 	Game.mutations = {}
 	Game.tides = {}
 	main.tides._ensure()
+	Game.buffs.erase("silent_wild")
 
 
 func _wipe() -> void:
@@ -377,6 +380,34 @@ func _test_brood() -> void:
 	_reset_aliens()
 
 
+# ---------------------------------------------------------------- 3c. cataclysms
+func _test_cataclysms() -> void:
+	print("== cataclysms")
+	var t: Tides = main.tides
+	var w: World = main.world
+	_reset_aliens()
+	main.colony.arrive("saucer")
+	main.swarm.arrive("wasps")
+	main.cards.apply([["field", "", "mixed"], ["build", "coop", 1], ["plant", "turnip", 4]])
+	step(400.0)
+	for k in ["aliens", "insects", "wild", "farm"]:
+		check(t.alive(k), "%s present before its cataclysm" % k)
+	for k in ["aliens", "insects", "wild", "farm"]:
+		t.roll_cataclysm(k)
+		step(120.0 if k == "aliens" else 6.0)
+		check(not t.alive(k), "the %s cataclysm wipes them out" % k)
+		t._sample()
+	print("   %s" % t.extinction_line())
+	check(int(Game.tides["extinct"].size()) == 4, "all four extinctions were tracked (%s)" % str(Game.tides["extinct"]))
+	check(main.world.farmer != null and main.world.farmer.state != "", "the farmer survived the dark harvest")
+	# comebacks: the farmer breaks new ground, the wild returns when the silence ends
+	step(Game.DAY_LENGTH)
+	check(t.alive("farm"), "the farm comes back (tilled %d)" % w.tilled_cells().size())
+	step(Game.DAY_LENGTH * 2.2)
+	check(t.alive("wild"), "the wild comes back after the silence")
+	_reset_aliens()
+
+
 # ---------------------------------------------------------------- 4. natural run
 func _test_natural_run() -> void:
 	print("== natural run: %d days" % days)
@@ -435,6 +466,10 @@ func _test_natural_run() -> void:
 		lo["farm"], hi["farm"], lo["aliens"], hi["aliens"], lo["wild"], hi["wild"], max_pop, villages,
 		int(Game.colony["born"]), int(Game.colony["died"])])
 	print("   tide turns seen: %s; mutations: %s" % [str(turns_seen.keys()), str(Game.mutations.keys())])
+	print("   cataclysms %d; %s" % [int(Game.tides.get("cataclysms", 0)), main.tides.extinction_line()])
+	var ex: Dictionary = Game.tides.get("extinct", {})
+	if days >= 12:
+		check(ex.size() >= 2, "at least two different factions were wiped out at some point (%s)" % str(ex))
 	print("   brood: %d broods rose, max %d insects, %d wars, %d sinkholes, max bare %d, water %d -> %d, insect share %.2f-%.2f" % [
 		broods, max_bugs, wars, int(Game.brood.get("sinkholes", 0)), max_bare, water0, main.world.ground.count(World.G_WATER),
 		lo["insects"], hi["insects"]])
@@ -447,7 +482,7 @@ func _test_natural_run() -> void:
 	check(max_pop >= 3, "the colony grew (max pop %d)" % max_pop)
 	check(hi["aliens"] - lo["aliens"] > 0.1, "the aliens' share of power moved")
 	check(hi["farm"] - lo["farm"] > 0.1, "the farm's share of power moved")
-	check(lo["farm"] > 0.05, "the farmer was never wiped out")
+	check(main.world.farmer != null and Game.health > 0.0 or main.world.farmer.state == "fainted", "the farmer himself survived everything")
 	check(main.world.farmer != null, "the farmer still exists")
 	check(not col.protected(Vector2i(-1, -1)) or true, "protected() callable")
 	for c in main.world.alien_land:

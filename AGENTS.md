@@ -52,4 +52,4 @@ moment to connect. If the editor isn't open, ask the user to open the project in
 ## Debug keys (debug builds only)
 F1 push a card into the box, F2 fill the box, F3 random event, F4 10x speed,
 F5 wipe the current slot, F6 +10 weirdness, F7 alien arrival, F8 turn the tides,
-F9 brood (insect) arrival, F10 locust swarm.
+F9 brood (insect) arrival, F10 locust swarm, F11 a random cataclysm.

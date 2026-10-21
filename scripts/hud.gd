@@ -610,6 +610,8 @@ func _draw_faction_lines(x: float, y: float) -> void:
 		for line in Art.wrap("TIDES: " + tides.status_line(), 42):
 			_txt(line, Vector2(x, y), Color("73eff7"))
 			y += 7
+		_txt(tides.extinction_line(), Vector2(x, y), C_DIM)
+		y += 7
 
 
 # ---------------------------------------------------------------- bars

@@ -970,10 +970,13 @@ func _process(delta: float) -> void:
 		var ash := cells_with_obj(["ash"])
 		if ash.size() > 0 and randf() < 0.5:
 			remove_obj(ash.pick_random())
-		if randf() < 0.3 and cells_with_obj(DEBRIS).size() < 60:
+		# after a scorching the wild floods back for a day ("wild_return")
+		var surge := Game.buff("wild_return")
+		if (randf() < 0.3 or surge) and cells_with_obj(DEBRIS).size() < 60 and not Game.buff("silent_wild"):
 			var cells := free_grass_cells().filter(func(c: Vector2i) -> bool: return not bare.has(c))
-			if cells.size() > 0:
-				place_obj(cells.pick_random(), "weed" if randf() < 0.7 else "tallgrass")
+			for i in (4 if surge else 1):
+				if cells.size() > 0:
+					place_obj(cells.pick_random(), ["weed", "tallgrass", "bush", "bramble"].pick_random() if surge else ("weed" if randf() < 0.7 else "tallgrass"))
 	queue_redraw()
 	if entity_layer:
 		entity_layer.queue_redraw()

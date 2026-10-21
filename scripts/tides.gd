@@ -10,7 +10,17 @@ class_name Tides
 ##             faction gets a lift)
 ##   upheaval  if the shares have barely moved lately, something big happens to anyone
 ##   ripple    otherwise, now and then, a smaller boon or bane
-## The farm can be pushed around but never knocked out: below a floor it only gets boons.
+## Ordinary turns never push the farm below a floor. CATACLYSMS are different: every day or
+## two the tides may roll one, aimed mostly at whoever dominates (or at anyone when things have
+## gone stale), and a cataclysm can wipe a faction out entirely:
+##   aliens   a hive-sickness kills every alien, or the homeworld recalls the whole colony
+##   insects  the long frost: every insect dies, the mounds go cold, the tunnels cave in
+##   wild     the scorching: every weed, bush and tree burns off, critters fall silent for a while
+##   farm     the dark harvest: fields, crops, the coop, fences, wooden buildings and the hens are
+##            lost. The farmer himself always survives in his house and starts again.
+## Every faction can come back: aliens and insects re-arrive, the wild creeps in from the edges
+## when the silence ends, the farmer plans new fields. Extinctions and returns are tracked
+## (Game.tides.alive / extinct) and logged.
 ## State lives in Game.tides so it saves with the slot.
 
 const FACTIONS := ["farm", "aliens", "insects", "wild"]
@@ -41,13 +51,21 @@ func _ensure() -> void:
 		t["dom"] = {"who": "", "n": 0}
 	if not t.has("last"):
 		t["last"] = ""
+	if not t.has("cata_t"):
+		t["cata_t"] = Game.DAY_LENGTH * randf_range(1.5, 3.0)
+	if not t.has("alive"):
+		t["alive"] = {}
+	if not t.has("extinct"):
+		t["extinct"] = {}
+	if not t.has("cataclysms"):
+		t["cataclysms"] = 0
 
 
 func _process(delta: float) -> void:
 	if not Game.running or world == null:
 		return
 	var d := delta * Game.time_scale
-	if not Game.tides.has("check_t"):
+	if not Game.tides.has("cata_t"):
 		_ensure()
 	_sample_t -= d
 	if _sample_t <= 0.0:
@@ -57,6 +75,17 @@ func _process(delta: float) -> void:
 	if float(Game.tides["check_t"]) <= 0.0:
 		Game.tides["check_t"] = randf_range(200.0, 420.0)
 		turn()
+	if Game.tides.get("silenced", false) and not Game.buff("silent_wild"):
+		# the silence ends: the wild floods back in from the edges
+		Game.tides["silenced"] = false
+		world.overgrow(18)
+		Game.add_buff("wild_return", Game.DAY_LENGTH)
+		cards.apply([["trees", 2], ["spawn", "rabbit", 2], ["spawn", "crow", 2]])
+		Game.add_log("The silence breaks. Seeds blow in, burrows reopen: the wild is coming back.")
+	Game.tides["cata_t"] = float(Game.tides["cata_t"]) - d
+	if float(Game.tides["cata_t"]) <= 0.0:
+		Game.tides["cata_t"] = Game.DAY_LENGTH * randf_range(1.2, 2.6)
+		roll_cataclysm()
 
 
 # ---------------------------------------------------------------- power
@@ -101,6 +130,196 @@ func _sample() -> void:
 	h.append(shares())
 	while h.size() > HISTORY:
 		h.pop_front()
+	_track_survival()
+
+
+## Is the faction on the farm at all? (The farm "falls" when nothing but the farmer is left.)
+func alive(who: String) -> bool:
+	match who:
+		"aliens":
+			return colony != null and not colony.members().is_empty()
+		"insects":
+			return swarm != null and not swarm.members().is_empty()
+		"wild":
+			# living wild only: rocks and ash don't count
+			var n := 0
+			for c in world.objs:
+				var t: String = world.objs[c]["type"]
+				if t in ["weed", "tallgrass", "bush", "bramble", "stump", "log"] or t in World.TREES:
+					n += 1
+			for a in world.threats():
+				if not a is Alien and not a is Insect:
+					n += 2
+			return n >= 4
+		"farm":
+			if world.tilled_cells().size() > 0 or world.crops.size() > 0:
+				return true
+			for c in world.objs:
+				if Game.STRUCTS.has(world.objs[c]["type"]) and int(Game.STRUCTS[world.objs[c]["type"]]["level"]) < 99:
+					return true
+			return false
+	return true
+
+
+const GONE_LINES := {
+	"aliens": ["THE ALIENS ARE GONE. Not one is left on the farm.", "The aliens have returned to the farm!"],
+	"insects": ["THE BROOD IS GONE. The mounds are silent.", "Giant insects are back on the farm!"],
+	"wild": ["THE WILD IS GONE. Not a weed, not a critter.", "The wild is creeping back in."],
+	"farm": ["THE FARM HAS FALLEN. Only the farmer and his house remain.", "The farm lives again: the farmer has broken new ground."],
+}
+
+
+func _track_survival() -> void:
+	var al: Dictionary = Game.tides["alive"]
+	var ex: Dictionary = Game.tides["extinct"]
+	for k in FACTIONS:
+		var now := alive(k)
+		var before: bool = bool(al.get(k, now))
+		if before and not now:
+			ex[k] = int(ex.get(k, 0)) + 1
+			Game.add_log(GONE_LINES[k][0])
+		elif not before and now:
+			Game.add_log(GONE_LINES[k][1])
+		al[k] = now
+
+
+# ---------------------------------------------------------------- cataclysms
+## Picks a target: mostly the strongest, more so the longer the balance has been stale.
+func roll_cataclysm(force: String = "") -> String:
+	var s := shares()
+	var who := force
+	if who == "":
+		var stale := movement() < 0.2
+		var weights := {}
+		var total := 0.0
+		for k in FACTIONS:
+			if not alive(k):
+				continue
+			var w: float = pow(float(s[k]) + 0.05, 2.0) * (2.0 if stale else 1.0)
+			if k == "farm":
+				w *= 0.6   # the farm is the heart of the game: hit it a bit less often
+			weights[k] = w
+			total += w
+		# not every roll lands: quiet farms are hit more often
+		var chance := 0.55 + (0.3 if stale else 0.0)
+		if total <= 0.0 or randf() > chance:
+			return ""
+		var r := randf() * total
+		for k in weights:
+			r -= float(weights[k])
+			if r <= 0.0:
+				who = k
+				break
+	if who == "" or not alive(who):
+		return ""
+	Game.tides["cataclysms"] = int(Game.tides["cataclysms"]) + 1
+	Game.tides["last"] = "cataclysm:" + who
+	director.shake.emit(5.0)
+	match who:
+		"aliens": _wipe_aliens()
+		"insects": _wipe_insects()
+		"wild": _wipe_wild()
+		"farm": _wipe_farm()
+	return who
+
+
+func _wipe_aliens() -> void:
+	if randf() < 0.5:
+		var n := 0
+		for a in colony.members():
+			a.die("the hive-sickness")
+			n += 1
+		Game.add_log("CATACLYSM: a hive-sickness sweeps through the aliens. All %d of them perish in one night." % n)
+	else:
+		colony.ship("exodus", colony.center_pos(), [])
+		for a in colony.members():
+			if a.caste == "egg":
+				a.die("abandonment")
+			else:
+				a.state = "leave"
+				a.exit_pos = Vector2(a.pos.x + randf_range(-30, 30), -70)
+				a.speed = 45.0
+		Game.colony["era"] = "exodus"
+		Game.add_log("CATACLYSM: the sky splits open with light. The homeworld recalls EVERY alien, now.")
+
+
+func _wipe_insects() -> void:
+	var n := 0
+	for a in swarm.members():
+		a.die("the long frost")
+		n += 1
+	for m in swarm.mounds():
+		world.remove_obj(m)
+		world.place_obj(m, "i_hole", {"t": 1200.0})
+	var land: Array = world.insect_land.keys()
+	land.shuffle()
+	for c in land.slice(0, 3):
+		swarm.sinkhole(c, randi_range(1, 2))
+	for c in world.cells_with_obj(["i_web"]):
+		world.remove_obj(c)
+	Game.set_weather("cloudy")
+	Game.add_log("CATACLYSM: the long frost. Every insect on the farm (%d) froze in the night. The tunnels cave in." % n)
+
+
+func _wipe_wild() -> void:
+	var n := 0
+	for c in world.objs.keys():
+		var t: String = world.objs[c]["type"]
+		if t in ["weed", "tallgrass", "bush", "bramble", "stump", "log"] or t in World.TREES:
+			world.remove_obj(c)
+			if t in World.TREES and randf() < 0.5:
+				world.place_obj(c, "ash")
+			n += 1
+	for a in world.animals:
+		if not a.dead and a.kind in Animal.THREATS:
+			a.dead = true
+	for y in world.ROWS:
+		for x in world.COLS:
+			var c2 := Vector2i(x, y)
+			if world.is_free_grass(c2) and randf() < 0.6:
+				world.bare[c2] = randf_range(400.0, 900.0)
+	Game.add_buff("silent_wild", Game.DAY_LENGTH * randf_range(1.0, 2.0))
+	Game.tides["silenced"] = true
+	Game.set_weather("heat")
+	Game.add_log("CATACLYSM: the scorching. %d patches of wild burned off; not a critter stirs. The wild is gone... for now." % n)
+
+
+func _wipe_farm() -> void:
+	var lost := 0
+	for c in world.crops.keys():
+		world.crops.erase(c)
+		lost += 1
+	for c in world.tilled_cells():
+		world.set_tilled(c, false)
+		if randf() < 0.5:
+			world.place_obj(c, ["weed", "tallgrass"].pick_random())
+	world.fields.clear()
+	for c in world.objs.keys():
+		var t: String = world.objs[c]["type"]
+		if Game.STRUCTS.has(t) and int(Game.STRUCTS[t]["level"]) < 99:
+			world.remove_obj(c)
+			world.place_obj(c, "ash")
+			lost += 1
+	for a in world.animals:
+		if a.kind in ["chicken", "dog"]:
+			a.dead = true
+	for k in Game.inventory.keys():
+		if not k in Game.MATERIALS:
+			Game.inventory.erase(k)
+	Game.mood = maxf(5.0, Game.mood - 40.0)
+	if world.farmer:
+		world.farmer.say("It's all gone... Right. Start again.", 5.0)
+	Game.set_weather("storm")
+	Game.add_log("CATACLYSM: the dark harvest. Blight, flood and fire take every field, every crop and every building. Only the farmer and his house survive.")
+
+
+func extinction_line() -> String:
+	var ex: Dictionary = Game.tides.get("extinct", {})
+	var parts: Array = []
+	for k in FACTIONS:
+		if int(ex.get(k, 0)) > 0:
+			parts.append("%s x%d" % [{"insects": "BROOD"}.get(k, String(k).to_upper()), int(ex[k])])
+	return "WIPED OUT: " + (", ".join(parts) if parts.size() > 0 else "NOBODY YET")
 
 
 ## How much the balance has moved over the last n samples (sum of share changes).
