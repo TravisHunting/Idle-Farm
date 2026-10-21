@@ -1152,6 +1152,10 @@ func _ready() -> void:
 	var alien: Dictionary = alien_art.SPRITES.merged(alien_art.variants(SPRITES))
 	for key in alien:
 		_tex[key] = _from_ascii(alien[key])
+	var insect_art = preload("res://scripts/art_insect.gd")
+	var insect: Dictionary = insect_art.SPRITES.merged(insect_art.variants(SPRITES))
+	for key in insect:
+		_tex[key] = _from_ascii(insect[key])
 	_tex["ufo"] = _tex["saucer"]   # the landed saucer of the "Lights in the Sky" mystery
 	_tex["pine"] = _paint_pine()
 	_tex["gear"] = _from_ascii([".7.7.7.", "7777777", ".77.77.", "777.777", ".77.77.", "7777777", ".7.7.7."])

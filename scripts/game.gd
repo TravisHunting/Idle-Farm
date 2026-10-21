@@ -124,6 +124,8 @@ const MUTATIONS := {
 	"glow":      {"name": "Glowing", "desc": "Glows at night. Foxes keep their distance."},
 	"tentacle":  {"name": "Tentacle Arm", "desc": "Works 30% faster. Deeply unsettling."},
 	"hive_mind": {"name": "Hive Whispers", "desc": "Shares a larder with the hive. No more raids."},
+	"chitin":    {"name": "Chitin Plates", "desc": "From a mantis sting: takes 40% less damage."},
+	"compound_eyes": {"name": "Compound Eyes", "desc": "Sees everything. Never steps on a snake."},
 }
 
 ## The farmer's personality, rolled when a farm is founded.
@@ -165,6 +167,9 @@ const TREASURES := {
 	"alien_bolt":   {"name": "Alien Bolt", "worth": 20, "kind": "souvenir", "desc": "No thread. Still fits."},
 	"star_shard":   {"name": "Star Shard", "worth": 30, "kind": "souvenir", "desc": "Warm. Fell from the sky."},
 	"blue_ribbon":  {"name": "Blue Ribbon", "worth": 40, "kind": "souvenir", "desc": "FIRST PRIZE. Nearly framed."},
+	"chitin":       {"name": "Chitin Shard", "worth": 8, "kind": "souvenir", "desc": "Off a giant bug. Shiny as a beetle."},
+	"silk":         {"name": "Silk Spool", "worth": 12, "kind": "souvenir", "desc": "Spider-ish silk. Stronger than rope."},
+	"royal_jelly":  {"name": "Royal Jelly", "worth": 150, "kind": "keepsake", "desc": "A gift from an insect queen."},
 	"grandpa_letter": {"name": "Grandpas Letter", "worth": 10, "kind": "keepsake", "desc": "In grandpa's wobbly hand."},
 	"egg_shell":    {"name": "Egg Shell", "worth": 200, "kind": "keepsake", "desc": "What the hatchling came from."},
 	"bound_tome":   {"name": "Bound Tome", "worth": 250, "kind": "keepsake", "desc": "The pages found each other."},
@@ -244,6 +249,7 @@ var sagas := {}          # mystery id -> {stage, t, data, done} (see sagas.gd)
 var colony := {}         # the alien faction's state (colony.gd)
 var mutations := {}      # id -> true (see MUTATIONS)
 var tides := {}          # faction balance history + timers (tides.gd)
+var brood := {}          # the mutant insects' state (swarm.gd)
 var settings := {"dock": "right", "card_minutes": DEFAULT_CARD_MINUTES, "speed": 1}
 var time_scale := 1.0    # game speed (fast forward), from settings["speed"]
 var play_seconds := 0.0
@@ -277,6 +283,7 @@ func reset() -> void:
 	colony = {}
 	mutations = {}
 	tides = {}
+	brood = {}
 
 
 func _process(delta: float) -> void:
@@ -683,7 +690,7 @@ func to_dict() -> Dictionary:
 		"mood": mood, "poison": poison, "stats": stats, "log": log_lines, "weird": weird,
 		"relics": relics, "unlocked": unlocked, "favor_crop": favor_crop, "pending": pending,
 		"seen": seen, "play_seconds": play_seconds,
-		"colony": colony, "mutations": mutations, "tides": tides,
+		"colony": colony, "mutations": mutations, "tides": tides, "brood": brood,
 	}
 
 
@@ -701,6 +708,7 @@ func from_dict(d: Dictionary) -> void:
 	colony = d.get("colony", {})
 	mutations = d.get("mutations", {})
 	tides = d.get("tides", {})
+	brood = d.get("brood", {})
 	day = int(d.get("day", day))
 	time_of_day = float(d.get("time_of_day", time_of_day))
 	weather = String(d.get("weather", weather))

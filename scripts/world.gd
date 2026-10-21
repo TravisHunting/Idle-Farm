@@ -34,12 +34,19 @@ const CLEARABLE := {
 	"log":       {"dur": 3.0, "tool": "tool_axe", "drops": {"wood": 3}},
 	"a_ruin":    {"dur": 4.0, "tool": "tool_hammer", "drops": {"stone": 2, "ore": 1}},
 	"a_husk":    {"dur": 1.5, "tool": "tool_hammer", "drops": {"stone": 1}},
+	"i_web":     {"dur": 1.5, "tool": "tool_sickle", "drops": {}},
+	"i_comb":    {"dur": 3.0, "tool": "tool_hammer", "drops": {"honey": 2}},
+	"i_husk":    {"dur": 1.0, "tool": "tool_hammer", "drops": {}},
+	"i_hole":    {"dur": 1.2, "tool": "tool_hoe", "drops": {}},
+	"i_fungus":  {"dur": 1.2, "tool": "tool_sickle", "drops": {}},
 }
 const TREES := ["tree", "pine"]
 ## Object types that block movement (structures use Game.STRUCTS[...].solid).
 const SOLID_DEBRIS := ["rock", "boulder", "stump", "log", "bush", "bramble", "tree", "pine", "ore", "bin", "a_ruin"]
 ## Alien village buildings (colony.gd); the solid ones block walking.
 const ALIEN_SOLID := ["a_pod", "a_hatchery", "a_spire", "a_dish", "a_pylon"]
+## The Brood's works (swarm.gd) that block walking: mounds, wax walls, webs.
+const INSECT_SOLID := ["i_mound", "i_comb", "i_web"]
 ## Objects left by the mysteries (sagas.gd): never cleared, burned or built over. Solid ones block.
 const MYSTERY := ["strange_egg", "strange_egg_glow", "strange_egg_cracked", "ufo", "glyph", "candle", "bootprints"]
 const MYSTERY_SOLID := ["strange_egg", "strange_egg_glow", "strange_egg_cracked", "ufo"]
@@ -97,6 +104,8 @@ var crops := {}                        # Vector2i -> {type, growth, health, dead
 var objs := {}                         # Vector2i -> {type, hp, ...}
 var fields: Array = []                 # [{cells: [Vector2i], shape, crop}]
 var alien_land := {}                   # Vector2i -> true: the alien creep (colony.gd)
+var insect_land := {}                  # Vector2i -> true: the Brood's tunnels (swarm.gd)
+var bare := {}                         # Vector2i -> seconds: stripped to dirt by locusts; nothing regrows
 var biome := "meadow"
 var house := Vector2i(0, 0)            # top-left cell of the 2x2 house
 var DOOR := Vector2i(1, 2)
@@ -110,6 +119,7 @@ var entity_layer: Node2D
 var fx_layer: Node2D
 var director: Node
 var colony: Colony
+var swarm: Swarm
 
 var _weed_t := 0.0
 var _anim_t := 0.0
@@ -135,6 +145,8 @@ func new_farm() -> void:
 	animals.clear()
 	fields.clear()
 	alien_land.clear()
+	insect_land.clear()
+	bare.clear()
 	var rng := RandomNumberGenerator.new()
 	rng.randomize()
 	biome = BIOMES.keys()[rng.randi() % BIOMES.size()]
@@ -382,7 +394,7 @@ func is_solid(c: Vector2i) -> bool:
 	if not objs.has(c):
 		return false
 	var t := obj_type(c)
-	if t in SOLID_DEBRIS or t in MYSTERY_SOLID or t in ALIEN_SOLID:
+	if t in SOLID_DEBRIS or t in MYSTERY_SOLID or t in ALIEN_SOLID or t in INSECT_SOLID:
 		return true
 	if Game.STRUCTS.has(t):
 		return Game.STRUCTS[t]["solid"]
@@ -395,7 +407,8 @@ func is_walkable(c: Vector2i) -> bool:
 
 func is_free_grass(c: Vector2i) -> bool:
 	return in_bounds(c) and not is_house(c) and ground[idx(c)] == G_GRASS and not objs.has(c) \
-		and c != DOOR and c != BIN_FRONT and not crops.has(c) and not alien_land.has(c)
+		and c != DOOR and c != BIN_FRONT and not crops.has(c) and not alien_land.has(c) \
+		and not insect_land.has(c)
 
 
 func is_clearable(c: Vector2i) -> bool:
@@ -599,7 +612,7 @@ func is_planned(c: Vector2i) -> bool:
 func _field_ok(c: Vector2i) -> bool:
 	if not in_bounds(c) or is_house(c) or c == DOOR or c == BIN or c == BIN_FRONT:
 		return false
-	if ground[idx(c)] != G_GRASS or crops.has(c) or alien_land.has(c):
+	if ground[idx(c)] != G_GRASS or crops.has(c) or alien_land.has(c) or insect_land.has(c):
 		return false
 	return not objs.has(c) or is_clearable(c)
 
@@ -928,7 +941,7 @@ func overgrow(n: int, types: Array = ["weed", "tallgrass", "bush", "bramble"]) -
 	var cells := free_grass_cells()
 	cells.shuffle()
 	for i in mini(n, cells.size()):
-		if is_planned(cells[i]) and randf() < 0.5:
+		if (is_planned(cells[i]) and randf() < 0.5) or bare.has(cells[i]):
 			continue
 		place_obj(cells[i], types.pick_random())
 		puff(center(cells[i]), Color("38b764"), 3, 8.0)
@@ -947,6 +960,8 @@ func _process(delta: float) -> void:
 			animals.erase(a)
 			if a is Alien and colony:
 				colony.on_gone(a)
+			elif a is Insect and swarm:
+				swarm.on_gone(a)
 	_update_fx(d)
 	_weed_t += d
 	if _weed_t > 25.0:
@@ -956,7 +971,7 @@ func _process(delta: float) -> void:
 		if ash.size() > 0 and randf() < 0.5:
 			remove_obj(ash.pick_random())
 		if randf() < 0.3 and cells_with_obj(DEBRIS).size() < 60:
-			var cells := free_grass_cells()
+			var cells := free_grass_cells().filter(func(c: Vector2i) -> bool: return not bare.has(c))
 			if cells.size() > 0:
 				place_obj(cells.pick_random(), "weed" if randf() < 0.7 else "tallgrass")
 	queue_redraw()
@@ -1123,6 +1138,8 @@ func _draw() -> void:
 					_draw_water(Vector2i(x, y), p)
 				_:
 					draw_texture(Art.tex("grass%d" % gvar[i]), p)
+	_draw_bare()
+	_draw_tunnels()
 	_draw_creep()
 	for c in crops:
 		var cr: Dictionary = crops[c]
@@ -1142,6 +1159,28 @@ func _draw() -> void:
 		draw_texture(Art.tex(name), Vector2(c.x * T, c.y * T + bob - 2), mod)
 		if st >= 2 and cr["type"] in GLOWING and Game.darkness() > 0.3:
 			draw_circle(center(c), 7.0, Color(0.45, 1.0, 0.95, 0.12 * Game.darkness()))
+
+
+## Locust-stripped ground: dirt with a few chewed stalks.
+func _draw_bare() -> void:
+	for c: Vector2i in bare:
+		var p := Vector2(c * T)
+		var fade := clampf(float(bare[c]) / 120.0, 0.0, 1.0)
+		draw_rect(Rect2(p, Vector2(T, T)), Color(0.55, 0.4, 0.26, 0.85 * fade))
+		var h := (c.x * 31 + c.y * 17) % 9
+		draw_rect(Rect2(p + Vector2(3 + h, 5), Vector2(1, 2)), Color(0.42, 0.5, 0.25, fade))
+		draw_rect(Rect2(p + Vector2(11 - h / 2, 11), Vector2(1, 2)), Color(0.42, 0.5, 0.25, fade))
+
+
+## The Brood's tunnels: dug-over soil with burrow holes.
+func _draw_tunnels() -> void:
+	for c: Vector2i in insect_land:
+		var p := Vector2(c * T)
+		draw_rect(Rect2(p, Vector2(T, T)), Color(0.36, 0.24, 0.15, 0.45))
+		var h := (c.x * 53 + c.y * 29) % 6
+		draw_rect(Rect2(p + Vector2(3 + h, 4 + h / 2), Vector2(2, 1)), Color(0.12, 0.08, 0.06, 0.8))
+		draw_rect(Rect2(p + Vector2(9 - h / 2, 10), Vector2(2, 1)), Color(0.12, 0.08, 0.06, 0.6))
+		draw_rect(Rect2(p + Vector2(6, 2 + h), Vector2(1, 1)), Color(0.6, 0.45, 0.3, 0.6))
 
 
 ## The alien creep: a violet film with glowing veins that pulse, edged where it meets grass.
@@ -1208,7 +1247,13 @@ func to_dict() -> Dictionary:
 	var land: Array = []
 	for c: Vector2i in alien_land:
 		land.append("%d,%d" % [c.x, c.y])
-	return {"alien_land": land, "rows": ROWS, "ground": Array(ground), "wet": Array(wet), "crops": cr, "objs": ob, "animals": an,
+	var tun: Array = []
+	for c in insect_land:
+		tun.append("%d,%d" % [c.x, c.y])
+	var br := {}
+	for c in bare:
+		br["%d,%d" % [c.x, c.y]] = bare[c]
+	return {"alien_land": land, "insect_land": tun, "bare": br, "rows": ROWS, "ground": Array(ground), "wet": Array(wet), "crops": cr, "objs": ob, "animals": an,
 		"farmer": farmer.to_dict() if farmer else {}, "fields": fl, "biome": biome,
 		"house": "%d,%d" % [house.x, house.y], "bin": "%d,%d" % [BIN.x, BIN.y]}
 
@@ -1257,6 +1302,15 @@ func from_dict(d: Dictionary) -> void:
 		var c3 := _key_cell(String(k))
 		if in_bounds(c3):
 			alien_land[c3] = true
+	insect_land.clear()
+	for k in d.get("insect_land", []):
+		var c4 := _key_cell(String(k))
+		if in_bounds(c4):
+			insect_land[c4] = true
+	bare.clear()
+	var br: Dictionary = d.get("bare", {})
+	for k in br:
+		bare[_key_cell(String(k))] = float(br[k])
 	animals.clear()
 	farmer = Farmer.new(self)
 	farmer.pos = feet(DOOR)
@@ -1264,7 +1318,13 @@ func from_dict(d: Dictionary) -> void:
 	for ad in d.get("animals", []):
 		var kind := String(ad.get("kind", "chicken"))
 		var ap := Vector2(float(ad.get("x", 80)), float(ad.get("y", 80)))
-		var a: Animal = Alien.new(self, String(ad.get("caste", "worker")), ap) if kind == "alien" else Animal.new(self, kind, ap)
+		var a: Animal
+		if kind == "alien":
+			a = Alien.new(self, String(ad.get("caste", "worker")), ap)
+		elif kind == "insect":
+			a = Insect.new(self, String(ad.get("caste", "worker")), ap)
+		else:
+			a = Animal.new(self, kind, ap)
 		a.from_dict(ad)
 		animals.append(a)
 

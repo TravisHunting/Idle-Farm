@@ -13,6 +13,7 @@ var world: World
 var director: Node
 var cards: Node
 var colony: Colony
+var swarm: Swarm
 var tides: Tides
 var hud: Control
 var farm_view: Control
@@ -101,6 +102,10 @@ func _build() -> void:
 	colony.name = "Colony"
 	colony.world = world
 	world.colony = colony
+	swarm = Swarm.new()
+	swarm.name = "Swarm"
+	swarm.world = world
+	world.swarm = swarm
 	var ents := preload("res://scripts/entity_layer.gd").new()
 	ents.name = "Entities"
 	ents.world = world
@@ -134,12 +139,17 @@ func _build() -> void:
 	colony.director = director
 	colony.cards = cards
 	_game_root.add_child(colony)
+	swarm.director = director
+	swarm.cards = cards
+	swarm.colony = colony
+	_game_root.add_child(swarm)
 	tides = Tides.new()
 	tides.name = "Tides"
 	tides.world = world
 	tides.director = director
 	tides.cards = cards
 	tides.colony = colony
+	tides.swarm = swarm
 	_game_root.add_child(tides)
 
 	var layer := CanvasLayer.new()
@@ -335,3 +345,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			colony.arrive("")
 		KEY_F8:
 			tides.turn()
+		KEY_F9:
+			swarm.arrive("")
+		KEY_F10:
+			swarm.launch_swarm("")

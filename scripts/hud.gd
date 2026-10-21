@@ -30,7 +30,7 @@ const C_WOOD := Color("c28a5a")
 const C_SHADOW := Color(0, 0, 0, 0.6)
 
 const MODAL := Rect2(6, 106, 180, 258)
-const PANEL := Rect2(6, 20, 180, 228)
+const PANEL := Rect2(6, 20, 180, 262)
 
 var world: World
 var director: Node
@@ -580,6 +580,23 @@ func _draw_faction_lines(x: float, y: float) -> void:
 		_txt("FOOD %d  MATTER %d  BORN %d  DIED %d" % [int(Game.colony["food"]), int(Game.colony["matter"]),
 			int(Game.colony["born"]), int(Game.colony["died"])], Vector2(x, y), C_DIM)
 		y += 7
+	var sw: Swarm = world.swarm
+	if sw != null:
+		y += 2
+		_txt("BROOD", Vector2(x, y), Color("ef7d57"))
+		if sw.active():
+			var rf := int(sw.rel_farm())
+			var ra := int(sw.rel_aliens())
+			var rs2 := "FARM %+d  ALIENS %+d" % [rf, ra]
+			_txt(rs2, Vector2(PANEL.end.x - 6 - Art.text_width(rs2), y), C_RED if sw.at_war() or rf < -30 else C_GOLD)
+		y += 7
+		for line in Art.wrap(sw.status_line(), 42):
+			_txt(line, Vector2(x, y), C_TEXT)
+			y += 7
+		if sw.active():
+			_txt("FOOD %d  WEBS %d  SINKHOLES %d  BARE %d" % [int(Game.brood["food"]), world.count_obj("i_web"),
+				int(Game.brood.get("sinkholes", 0)), world.bare.size()], Vector2(x, y), C_DIM)
+			y += 7
 	if not Game.mutations.is_empty():
 		var names: Array = []
 		for id in Game.mutations:
@@ -639,6 +656,8 @@ func _draw_status() -> void:
 		icons.append(["r_totem", "%d" % Game.totems])
 	if world and world.colony and world.colony.active():
 		icons.append(["r_alien", str(world.colony.population())])
+	if world and world.swarm and world.swarm.active():
+		icons.append(["r_brood", str(world.swarm.population())])
 	if not Game.mutations.is_empty():
 		icons.append(["r_mutation", ""])
 	if Game.buff("sun"):

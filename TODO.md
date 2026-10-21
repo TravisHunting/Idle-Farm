@@ -35,7 +35,7 @@ On launch a **welcome screen** explains how to play; the player clicks through a
 The long-term goal: the player watches, and guides with a light hand (cards), while systems and
 factions interact, reach out to each other, grow, build, die and keep shifting the balance of power.
 The farm must **never settle into equilibrium**, and the farmer is **never eliminated** (he can be
-changed drastically and lose territory). Three factions compete for the 12x22 farm:
+changed drastically and lose territory). Four factions compete for the 12x22 farm:
 - **The farm**: the farmer's fields, buildings, paths, chickens, friends.
 - **The aliens** (`colony.gd` + `alien.gd`): arrive by falling egg, saucer, strange visitor or a
   night lurker that mutates a hen; hatch, grow up into castes (worker/scout/warden/envoy/elder,
@@ -44,7 +44,21 @@ changed drastically and lose territory). Three factions compete for the 12x22 fa
   envoys, abduct (and mutate) the farmer, split in schisms and civil wars, and eventually hear
   "the call" (all leave, or a second wave arrives). With no aliens around, a new arrival is
   always on its way.
-- **The wild**: overgrowth and critters (foxes now hunt alien spawnlings; wardens hunt critters).
+- **The Brood** (`swarm.gd` + `insect.gd`), mutant insects the farm itself creates: "radiation"
+  (weirdness, alien creep, glowing crops, ore, the obelisk) mutates a wasp nest, a beehive or a
+  tree cocoon into a queen; failing that a locust cloud blows in and a fat one stays. Fast
+  generations: egg -> grub -> cocoon -> caste by need (ant workers, mantis soldiers, locusts when
+  hungry, silk spinners, glowflies, young queens who fly off to found new mounds). They reshape
+  the map hardest: mounds grow in 3 sizes, tunnels (`World.insect_land`) undermine fields, webs
+  wall off cells and trap critters, wax walls rise on war fronts, locust swarms strip whole bands
+  to bare dirt (`World.bare`, nothing regrows for a while), and rain over dense tunnels caves them
+  in: **sinkholes become permanent ponds** that swallow whatever stood there. Two relations:
+  with the farm (pollination + honey gifts vs. raids, grubs, stings) and with the aliens
+  (pollinated glow moss vs. **war**: a front line that moves cell by cell, mantises tearing down
+  pods, wardens zapping insects, insects nesting in alien ruins). Common enemies pull factions
+  together; a friend of your enemy is your enemy; each new queen re-rolls the temper.
+- **The wild**: overgrowth and critters (foxes hunt alien spawnlings, wardens and mantises hunt
+  critters, hens gobble grubs, webs eat rabbits, locusts strip the overgrowth).
 - **The tides** (`tides.gd`) measure each faction's share of power every 20s and, every few
   minutes, knock down a faction that dominated too long (hubris), shake things hard when shares
   have barely moved (upheaval), or throw a smaller boon/bane (ripple). Farm banes stop below an
@@ -65,7 +79,7 @@ changed drastically and lose territory). Three factions compete for the 12x22 fa
 - Settings (gear button, top bar): card cadence (1-60 min), window side; saved in `user://settings.json`.
 - Debug keys (only in debug builds): `F1` push a card into the box, `F2` fill the box, `F3` random event,
   `F4` toggle 10x time speed, `F5` wipe current slot & back to menu, `F6` +10 weirdness,
-  `F7` an alien arrival, `F8` force a turn of the tides.
+  `F7` an alien arrival, `F8` force a turn of the tides, `F9` a brood arrival, `F10` a locust swarm.
 - **Headless tests (the default dev loop):**
   `C:/Dev/Godot/Godot_v4.7.2-stable_win64.exe --headless --path . -s tests/sim_test.gd -- days=8 [seed=N] [verbose]`
   boots the real game on throwaway slot 9, exercises every alien arrival/card/boon/bane, runs N
@@ -98,6 +112,9 @@ changed drastically and lose territory). Three factions compete for the 12x22 fa
 | `scripts/alien.gd` (class **Alien** extends Animal) | One alien: caste behaviour (egg, spawn, worker, scout, warden, envoy, elder/matriarch, ship, stranger, lurker, mutant), ageing, hovering straight-line movement, drawing (saucer + beam). Saved with World.animals. |
 | `scripts/tides.gd` (class **Tides**) | Faction power (farm / aliens / wild), share history, hubris / upheaval / ripple turns of fate. State in `Game.tides`. |
 | `scripts/art_alien.gd` | ASCII sprites for every alien caste (2 frames each), matriarch, stranger, lurker, mutant hen, eggs, village buildings, glow moss, husk, ruin, icons. |
+| `scripts/swarm.gd` (class **Swarm**) | The Brood: radiation + arrivals, castes on emergence, food (fungus gardens, nectar, grazing, raids, swarms), eggs, mounds + build sites, tunnels, sinkholes, bare ground, webs, war fronts with the aliens, two-way relations, outreach, `boon()`/`bane()`. State in `Game.brood`. |
+| `scripts/insect.gd` (class **Insect** extends Animal) | One insect: caste behaviour (egg, grub, pupa, worker, soldier, locust, spinner, glowfly, queen, migrant), swarm/flight routes, glow variants, drawing. |
+| `scripts/art_insect.gd` | ASCII sprites for every insect caste (2 frames + glowing variants), queen, eggs, grubs, cocoon, mounds x3, web, wax wall, hole, husk, cordyceps, icons, treasures. |
 | `tests/sim_test.gd` + `tests/sim_runner.gd` | Headless simulation test (see How to run). |
 | `scripts/hud.gd` | In-game UI: top bar (coins/day/clock/weather, drag, menu/dock/min/close), status strip (HP/energy/mood/weirdness eye/buffs/activity/log), card tray (rarity borders, playable pip, OPEN ALL, relic shelf with tooltips), **choice-card modal**, speech bubbles & floating texts. |
 
@@ -231,6 +248,20 @@ Key systems added in v0.3:
 - [ ] Balance: established colonies hover around 40-55% share between swings; farmer mutations are rare without cards
 - [ ] Rival alien colonies (a schism could found a second village with its own temper)
 
+### v0.5: the Brood (mutant insects)
+- [x] Sprites: 7 castes x 2 frames + glowing variants, eggs, grubs, cocoon, mounds (3 sizes), web, wax wall, hole, husk, cordyceps, icons, 3 treasures
+- [x] Origin from the farm's own strangeness (wasps / beehive / tree cocoon) + locust-cloud fallback; a passing cloud may leave a queen
+- [x] Life cycle with fast generations; castes by need (hunger breeds locusts, war breeds mantises, creep breeds glowing insects); queens, succession, wedding flights
+- [x] Map changes: mounds, tunnels, undermined fields, webs, wax walls, locust strips (bare ground), sinkholes -> permanent ponds (capped at 48 water tiles)
+- [x] Relations with the farm and the aliens; war with a moving front line; alliances, common enemies; nesting in alien ruins; cordyceps spores reach the aliens
+- [x] Farm side: pollination, honey gifts + Queen's Gift card, raids, grubs vs roots, hens eat grubs, stings, chitin / compound-eye mutations, honey + smoke-out farmer tasks
+- [x] Tides: four factions; brood boons (swarm, wedding flight, bloom, molt) and banes (frost, cordyceps, flood, queen dies)
+- [x] 11 insect cards; HUD icon + farmer panel section; F9/F10
+- [x] Verified headless (all arrivals, castes, swarm, sinkholes, webs, war, cards, boons/banes, save/reload) over several 16-day seeds
+- [ ] UI pass via MCP with a live brood (only the staged snapshot so far)
+- [x] Brood caps + crowding: max 40 insects / 6 mounds / 4 queens, queen duels, great migrations (half leave, a mound is abandoned)
+- [ ] Balance: aliens now tend to stay small (max 9-20) and die out often against the brood; the water cap (48) is reached in long runs
+
 ## Next up / ideas (not started)
 - [ ] Balance pass on the deck (reward sizes vs. level scaling; how fast weirdness climbs)
 - [ ] More follow-up chains (tome -> ritual -> ?, the homunculus grows up, the stranger's contract)
@@ -262,6 +293,16 @@ Key systems added in v0.3:
   variable an explicit type instead of `:=`.
 
 ## Changelog
+- 2026-10-21 - v0.5: the Brood, a mutant insect faction (`swarm.gd`, `insect.gd`, `art_insect.gd`)
+  that reshapes the map (mounds, tunnels, webs, wax walls, locust-stripped bare ground, sinkhole
+  ponds) and has its own relations with the farm and the aliens (pollination, raids, war fronts,
+  alliances). Tides now balance four factions. Hooks in world, colony, alien (wardens fight
+  insects), farmer (honey / smoke-out, chitin + compound-eye mutations), animal, director,
+  entity layer, cards (brood requirements/effects), deck (11 cards), HUD, main (F9/F10).
+  `tests/sim_test.gd` now exits non-zero instead of hanging if the runner fails to compile.
+  Verified: 3 seeds x 10 days, 0 script errors; brood share swings 0-60%, 1-3 wars and up to 11
+  sinkholes per run, farm 24-85%. An uncapped first version took over (213 insects, 91%) and was
+  reined in with caps, queen duels and great migrations.
 - 2026-10-21 - v0.4: the alien faction and the tides. New `colony.gd`, `alien.gd`, `tides.gd`,
   `art_alien.gd`; hooks in world (creep, solid buildings, save), farmer (abduction, mutations,
   visits/sabotage), director (spire lightning, burning pods, glow vs foxes), animals (foxes hunt

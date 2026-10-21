@@ -29,8 +29,23 @@ func _run() -> void:
 	step(60.0)
 	Game.colony["matter"] = 120.0
 	Game.colony["food"] = 80.0
-	step(900.0)
-	for m in ["antenna", "green", "tentacle", "third_eye"]:
+	step(400.0)
+	# the brood: a beehive turns into a mound, gets fat, digs in, spins webs
+	main.cards.apply([["build", "beehive", 1], ["plant", "turnip", 6]])
+	main.swarm.arrive("hive")
+	Game.brood["food"] = 60.0
+	step(500.0)
+	for i in 3:
+		var b := Insect.new(main.world, ["spinner", "soldier", "locust"][i], main.swarm.home_pos(Vector2.ZERO) + Vector2(10, 8))
+		b.hive = main.swarm.mounds()[0]
+		main.world.add_animal(b)
+	step(120.0)
+	main.swarm.launch_swarm("farm")
+	step(14.0)
+	var land: Array = main.world.insect_land.keys()
+	if land.size() > 0:
+		main.swarm.sinkhole(land.pick_random(), 2)
+	for m in ["antenna", "green", "compound_eyes", "chitin"]:
 		col.mutate_farmer(m)
 	Game.time_of_day = 0.45
 	Game.weather = "sunny"
@@ -59,6 +74,7 @@ func step(seconds: float) -> void:
 		main.director._process(STEP)
 		main.cards._process(STEP)
 		main.colony._process(STEP)
+		main.swarm._process(STEP)
 		main.tides._process(STEP)
 
 

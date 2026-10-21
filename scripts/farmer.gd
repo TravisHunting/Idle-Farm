@@ -45,6 +45,8 @@ const LINES := {
 	"overgrown": ["So... much... grass.", "Grandpa really let this go.", "I can't even see the soil!"],
 	"visit_aliens": ["Hello, neighbours!", "Brought you a turnip!", "Greetings! Er, glorp?"],
 	"sabotage": ["Off my land!", "This is MY farm!", "Take that, space weeds!"],
+	"honey": ["Sweet! Thanks, big fellas.", "Honey for the chest... er, the pantry.", "Good bugs. GOOD bugs."],
+	"smoke": ["Out! Out of my farm!", "Smoke 'em out!", "No more tunnels under MY turnips!"],
 	"abducted_back": ["I've seen things...", "They probed my turnips.", "The stars! The STARS!", "How long was I gone?"],
 }
 
@@ -247,6 +249,8 @@ func hurt(amount: int, reason: String) -> void:
 		return
 	if Game.has_perk("tough"):
 		amount = maxi(1, amount / 2)
+	if Game.has_mutation("chitin"):
+		amount = maxi(1, int(amount * 0.6))
 	Game.health -= amount
 	Game.mood = maxf(0.0, Game.mood - amount * 0.4)
 	hurt_t = 0.6
@@ -544,6 +548,20 @@ func _choose() -> void:
 				cands.append([34, {"kind": "sabotage", "cell": world.nearest(targets, world.DOOR), "adj": world.is_solid(world.nearest(targets, world.DOOR)),
 					"dur": 3.0, "tool": "tool_hammer"}])
 
+	# the Brood's mounds: collect honey from friendly ones, smoke out hostile ones
+	var sw: Swarm = world.swarm
+	if sw != null and sw.active() and not Game.is_night():
+		var ms: Array = []
+		for c in sw.mounds():
+			if _can_reach(c, reach):
+				ms.append(c)
+		if ms.size() > 0:
+			var mc: Vector2i = world.nearest(ms, me)
+			if sw.rel_farm() > 30.0 and randf() < 0.1:
+				cands.append([28, {"kind": "honey", "cell": mc, "adj": true, "dur": 2.0, "tool": "tool_bucket"}])
+			elif sw.hostile() and Game.health > 45.0 and randf() < 0.2:
+				cands.append([36, {"kind": "smoke", "cell": mc, "adj": true, "dur": 3.5, "tool": "tool_bucket"}])
+
 	var wander := Vector2i(clampi(me.x + randi_range(-3, 3), 0, world.COLS - 1), clampi(me.y + randi_range(-3, 3), 0, world.ROWS - 1))
 	if world.is_walkable(wander) and not world.is_house(wander):
 		cands.append([26 if Game.quirk == "dreamer" else 12, {"kind": "wander", "cell": wander, "dur": randf_range(1.0, 3.0)}])
@@ -671,6 +689,8 @@ func _start(t: Dictionary) -> void:
 		"chop": say_line("chop", 0.3)
 		"pave": say_line("pave", 0.2)
 		"visit_aliens": say_line("visit_aliens", 0.7)
+		"honey": say_line("honey", 0.7)
+		"smoke": say_line("smoke", 0.9)
 		"sabotage": say_line("sabotage", 0.8)
 
 
@@ -702,8 +722,12 @@ func _describe(t: Dictionary) -> String:
 		"shoo":
 			if t["target"] is Alien:
 				return "Chasing off an alien %s" % t["target"].caste
+			if t["target"] is Insect:
+				return "Swatting a giant %s" % t["target"].caste
 			return "Chasing off a %s" % t["target"].kind
 		"visit_aliens": return "Visiting the alien village"
+		"honey": return "Collecting giant honey"
+		"smoke": return "Smoking out a bug mound!"
 		"sabotage": return "Wrecking alien stuff"
 		"extinguish": return "Fighting a fire!"
 		"sleep": return "Heading to bed"
@@ -763,7 +787,7 @@ func _walk(d: float) -> void:
 	if _step_towards(world.feet(next), d):
 		path.pop_front()
 		for a in world.animals:
-			if a.kind == "snake" and not a.dead and world.cell_of(a.pos) == next:
+			if a.kind == "snake" and not a.dead and world.cell_of(a.pos) == next and not Game.has_mutation("compound_eyes"):
 				a.bite_farmer()
 
 
@@ -1023,6 +1047,13 @@ func _finish() -> void:
 		"sabotage":
 			if world.colony:
 				world.colony.farmer_sabotage(c)
+		"honey":
+			if world.swarm:
+				world.swarm.farmer_harvest_honey(c)
+				say_line("honey", 0.5)
+		"smoke":
+			if world.swarm:
+				world.swarm.farmer_smoke(c)
 	_idle()
 
 
@@ -1094,6 +1125,14 @@ func _draw_mutations(ci: CanvasItem, bob: float) -> void:
 		ci.draw_rect(Rect2(5, -6 + bob, 1, 3), lime)
 		ci.draw_rect(Rect2(6 + roundf(sw), -3 + bob, 1, 3), lime)
 		ci.draw_rect(Rect2(7 + roundf(sw), -1 + bob, 1, 1), Color("38b764"))
+	if Game.has_mutation("chitin"):
+		ci.draw_rect(Rect2(-5, -7 + bob, 2, 2), Color("8b5a3c"))
+		ci.draw_rect(Rect2(3, -7 + bob, 2, 2), Color("8b5a3c"))
+		ci.draw_rect(Rect2(-5, -7 + bob, 1, 1), Color("c28a5a"))
+	if Game.has_mutation("compound_eyes"):
+		ci.draw_rect(Rect2(-4, -11 + bob, 2, 2), Color("b13e53"))
+		ci.draw_rect(Rect2(2, -11 + bob, 2, 2), Color("b13e53"))
+		ci.draw_rect(Rect2(-4, -11 + bob, 1, 1), Color("ef7d57"))
 	if Game.has_mutation("hive_mind") and int(anim_t * 2.0) % 3 == 0:
 		ci.draw_rect(Rect2(-6, -17 + bob, 1, 1), Color("73eff7"))
 		ci.draw_rect(Rect2(5, -16 + bob, 1, 1), Color("73eff7"))

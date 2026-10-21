@@ -1,8 +1,9 @@
 extends Node
 class_name Tides
 ## The Tides: keeps the farm from ever settling into equilibrium.
-## Three factions compete for the farm: the FARM (the farmer's fields, buildings and friends),
-## the ALIENS (colony.gd) and the WILD (overgrowth and critters). Every few seconds the tides
+## Four factions compete for the farm: the FARM (the farmer's fields, buildings and friends),
+## the ALIENS (colony.gd), the BROOD of mutant insects (swarm.gd) and the WILD (overgrowth and
+## critters). Every few seconds the tides
 ## measure each faction's power and keep a short history of their shares. Every few minutes
 ## they roll a turn of fate:
 ##   hubris    a faction that has dominated for a while gets knocked down (and the weakest
@@ -12,8 +13,8 @@ class_name Tides
 ## The farm can be pushed around but never knocked out: below a floor it only gets boons.
 ## State lives in Game.tides so it saves with the slot.
 
-const FACTIONS := ["farm", "aliens", "wild"]
-const NAMES := {"farm": "the farm", "aliens": "the aliens", "wild": "the wild"}
+const FACTIONS := ["farm", "aliens", "insects", "wild"]
+const NAMES := {"farm": "the farm", "aliens": "the aliens", "insects": "the brood", "wild": "the wild"}
 const SAMPLE_EVERY := 20.0
 const HISTORY := 30
 const FARM_FLOOR := 0.18
@@ -22,6 +23,7 @@ var world: World
 var director: Node
 var cards: Node
 var colony: Colony
+var swarm: Swarm
 var _sample_t := 3.0
 
 
@@ -76,10 +78,11 @@ func power() -> Dictionary:
 		if t2 in World.DEBRIS or t2 in World.TREES:
 			wild += 0.6
 	for a in world.threats():
-		if not a is Alien:
+		if not a is Alien and not a is Insect:
 			wild += 2.0
 	var aliens := colony.power() if colony else 0.0
-	return {"farm": maxf(1.0, farm), "aliens": aliens, "wild": maxf(1.0, wild)}
+	var insects := swarm.power() if swarm else 0.0
+	return {"farm": maxf(1.0, farm), "aliens": aliens, "insects": insects, "wild": maxf(1.0, wild)}
 
 
 func shares() -> Dictionary:
@@ -134,7 +137,7 @@ func turn() -> void:
 	var dom := ""
 	var weak := ""
 	for k in FACTIONS:
-		if k == "aliens" and not colony.active() and float(s[k]) < 0.01:
+		if not _present(k) and float(s[k]) < 0.01:
 			continue
 		if dom == "" or float(s[k]) > float(s[dom]):
 			dom = k
@@ -161,8 +164,8 @@ func turn() -> void:
 	elif hist_n >= 10 and movement() < 0.12:
 		# too calm: shake something hard
 		var who: String = FACTIONS.pick_random()
-		if who == "aliens" and not colony.active():
-			_boon("aliens")
+		if not _present(who):
+			_boon(who)
 		elif randf() < 0.5 or (who == "farm" and float(s["farm"]) < FARM_FLOOR):
 			_boon(who)
 		else:
@@ -177,10 +180,20 @@ func turn() -> void:
 		Game.tides["last"] = "ripple:" + who2
 
 
+## The aliens and the brood can be absent from the farm entirely.
+func _present(who: String) -> bool:
+	match who:
+		"aliens": return colony != null and colony.active()
+		"insects": return swarm != null and swarm.active()
+	return true
+
+
 func _boon(who: String) -> void:
 	match who:
 		"aliens":
 			colony.boon()
+		"insects":
+			swarm.boon()
 		"farm":
 			match ["harvest", "work_party", "reclaim", "second_wind"].pick_random():
 				"harvest":
@@ -223,6 +236,9 @@ func _bane(who: String) -> void:
 		"aliens":
 			if colony.bane() == "":
 				_bane("wild")
+		"insects":
+			if swarm.bane() == "":
+				_bane("wild")
 		"farm":
 			if shares()["farm"] < FARM_FLOOR:
 				return   # the farmer is never knocked out
@@ -238,7 +254,7 @@ func _bane(who: String) -> void:
 					director.run_event("boar")
 					Game.add_log("THE TIDE TURNS: a boar stampede!")
 				"fire":
-					var hosts: Array = world.cells_with_obj(["fence", "bench", "scarecrow", "beehive", "coop", "tree", "a_pod"])
+					var hosts: Array = world.cells_with_obj(["fence", "bench", "scarecrow", "beehive", "coop", "tree", "a_pod", "i_web"])
 					if hosts.size() > 0:
 						director.ignite(hosts.pick_random())
 					Game.add_log("THE TIDE TURNS: a spark in the dry grass...")
@@ -259,5 +275,5 @@ func status_line() -> String:
 	var t := trend()
 	var parts: Array = []
 	for k in FACTIONS:
-		parts.append("%s %d%%" % [String(k).to_upper(), int(float(s[k]) * 100.0)])
+		parts.append("%s %d%%" % [{"insects": "BROOD"}.get(k, String(k).to_upper()), int(float(s[k]) * 100.0)])
 	return " ".join(parts) + ((" - " + String(NAMES[t]).to_upper() + " RISING") if t != "" else "")

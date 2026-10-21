@@ -317,6 +317,25 @@ func _update_warden(d: float) -> void:
 		if dd < bd and (colony == null or colony.near_land(a.pos, 2)):
 			bd = dd
 			prey = a
+	# at war with the Brood: insects on or near the creep are fair game
+	if prey == null and world.swarm and world.swarm.at_war():
+		for a in world.animals:
+			if a is Insect and not a.dead and a.is_adult() and a.pos.distance_to(pos) < bd and colony and colony.near_land(a.pos, 2):
+				bd = a.pos.distance_to(pos)
+				prey = a
+	if prey != null and prey is Insect:
+		state = "hunt"
+		if _move(prey.pos, d, speed * 1.2) or bd < 9.0:
+			if zap_t <= 0.0:
+				zap_t = 1.5
+				world.puff(prey.pos + Vector2(0, -4), Color("73eff7"), 6, 14.0)
+				say("*ZAP*", 1.0)
+				if randf() < (0.35 if prey.glow else 0.55):
+					prey.die("an alien zap")
+					world.swarm.change_rel(0.0, -0.5)
+				else:
+					prey.scare()
+		return
 	if prey != null:
 		state = "hunt"
 		if _move(prey.pos, d, speed * 1.2) or bd < 9.0:

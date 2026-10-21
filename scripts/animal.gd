@@ -313,13 +313,18 @@ func _update_boar(d: float) -> void:
 			world.crops.erase(c)
 			world.puff(world.feet(c), Color("a7f070"), 6)
 		var o: Dictionary = world.obj_at(c)
-		if not o.is_empty() and (Game.STRUCTS.has(o["type"]) or o["type"] in World.ALIEN_SOLID) and o["type"] != "rod":
+		if not o.is_empty() and (Game.STRUCTS.has(o["type"]) or o["type"] in World.ALIEN_SOLID or o["type"] == "i_comb") and o["type"] != "rod":
 			if timer <= 0.0:
 				o["hp"] -= 25
 				timer = 0.6
 				world.puff(world.feet(c), Color("c28a5a"), 6)
 				if o["hp"] <= 0:
-					Game.add_log("The boar smashed the %s!" % (Game.STRUCTS[o["type"]]["name"] if Game.STRUCTS.has(o["type"]) else "alien " + String(Colony.BUILDINGS[o["type"]]["name"])))
+					var nm: String = "wax wall"
+					if Game.STRUCTS.has(o["type"]):
+						nm = Game.STRUCTS[o["type"]]["name"]
+					elif Colony.BUILDINGS.has(o["type"]):
+						nm = "alien " + String(Colony.BUILDINGS[o["type"]]["name"])
+					Game.add_log("The boar smashed the %s!" % nm)
 					world.remove_obj(c)
 	timer -= d
 	if not hit_farmer and _farmer_near(9.0):

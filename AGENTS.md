@@ -46,8 +46,10 @@ moment to connect. If the editor isn't open, ask the user to open the project in
 - Card content: `scripts/deck.gd` (documented mini-language). Card logic: `scripts/cards.gd`.
 - Farm generation, fields and paths: `scripts/world.gd`. Farmer AI: `scripts/farmer.gd`.
 - UI (box, stash, card modal, settings): `scripts/hud.gd`.
-- Alien faction: `scripts/colony.gd` + `scripts/alien.gd`; faction balance: `scripts/tides.gd`.
+- Alien faction: `scripts/colony.gd` + `scripts/alien.gd`; mutant insects: `scripts/swarm.gd` +
+  `scripts/insect.gd`; faction balance: `scripts/tides.gd`.
 
 ## Debug keys (debug builds only)
 F1 push a card into the box, F2 fill the box, F3 random event, F4 10x speed,
-F5 wipe the current slot, F6 +10 weirdness, F7 alien arrival, F8 turn the tides.
+F5 wipe the current slot, F6 +10 weirdness, F7 alien arrival, F8 turn the tides,
+F9 brood (insect) arrival, F10 locust swarm.

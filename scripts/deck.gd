@@ -26,6 +26,8 @@ class_name Deck
 ##   Aliens (colony.gd): ["aliens", n] population   ["no_aliens"]   ["alien_rel", n] relations >= n
 ##   ["alien_rel_below", n]   ["alien_land", n] creep tiles   ["alien_building", type]
 ##   ["mutation", id]   ["no_mutation", id]   ["mutations", n] (Game.MUTATIONS)
+##   Brood (swarm.gd): ["insects", n] adults   ["no_insects"]   ["brood_rel", n] (towards the farm)
+##   ["brood_rel_below", n]   ["brood_war"] (at war with the aliens)   ["mounds", n]   ["water", n] tiles
 ##
 ## Effects:
 ##   There is no money. Rewards go in the farmer's chest; a "cost" is always a consequence on the farm.
@@ -46,6 +48,9 @@ class_name Deck
 ##   food n   matter n   cede n (creep takes n tiles + a pylon)   reclaim n (creep pulls back, a
 ##   border building falls)   abduct (the farmer, for a while)   mutate id|""   cure   burn_moss
 ##   delay secs (next arrival)   gift   boon kind|""   bane kind|"" (see Colony.boon/bane)
+##   Brood: ["brood", op, arg] with op: arrive (wasps|hive|cocoon|locusts|"")   rel n (farm)
+##   rel_aliens n   temper n   food n   swarm (farm|aliens|wild|"" = where the locusts go)   flight
+##   sinkhole size   fill n (tunnels filled in)   burn_webs   cure_fungus   boon kind|""   bane kind|""
 ## Field shapes: see World.SHAPES ("" = farmer's whim). Perks: Game.PERKS. Friends: Game.FRIENDS.
 ## Buff names: sun (2x growth), growth (1.5x), dog, bounty, crow_truce, boar_guard, favor
 ## Time: one in-game day is 480s.
@@ -587,4 +592,62 @@ const CARDS := [
 		"text": "The farmer's new 'feature' itches. Also it hums. Also it has opinions.",
 		"a": {"label": "See the Doctor", "desc": "One mutation is cured. Doc doesn't ask questions.", "req": [], "fx": [["alien", "cure"], ["heal", 20]]},
 		"b": {"label": "Embrace It", "desc": "Lean in: another mutation, +15 mood, the farm gets weirder.", "req": [], "fx": [["alien", "mutate"], ["mood", 15], ["weird", 5]]}},
+	# ======================================================= THE BROOD (swarm.gd)
+	# arrivals: the farm's strangeness mutates its own insects
+	{"id": "humming_hive", "title": "The Hive Hums", "art": "beehive", "rarity": 2, "level": 1, "weird": 5,
+		"needs": [["obj", "beehive", 1], ["no_insects"]],
+		"text": "The beehive hums a note too low for bees. Something inside is getting bigger.",
+		"a": {"label": "Let It Hum", "desc": "It becomes a mound of giant bees. They like you.", "req": [], "fx": [["brood", "arrive", "hive"], ["brood", "rel", 30], ["weird", 3]]},
+		"b": {"label": "Smoke It Out", "desc": "Six jars of honey. Whatever was growing in there is cross.", "req": [], "fx": [["demolish", "beehive", 1], ["item", "honey", 6], ["brood", "temper", 0.25]]}},
+	{"id": "oak_cocoon", "title": "A Cocoon in the Oak", "art": "i_pupa", "rarity": 2, "level": 1, "weird": 8,
+		"needs": [["no_insects"], ["obj", "tree", 1]],
+		"text": "A cocoon the size of a pumpkin hangs from the old tree. It twitches when he looks at it.",
+		"a": {"label": "Leave It Be", "desc": "A queen will hatch. She'll remember the kindness.", "req": [], "fx": [["brood", "arrive", "cocoon"], ["brood", "rel", 25]]},
+		"b": {"label": "Cut It Down", "desc": "Two spools of fine silk. The forest seems to bristle.", "req": [], "fx": [["loot", "silk", 2], ["brood", "temper", 0.3]]}},
+	{"id": "locust_wind", "title": "Locusts on the Wind", "art": "i_locust1", "rarity": 2, "level": 1, "weird": 0,
+		"needs": [["no_insects"], ["day", 3]],
+		"text": "A brown smudge on the horizon, getting bigger. It buzzes.",
+		"a": {"label": "Ring the Bells", "desc": "They come anyway, but in a temper. +2 Lucky Charms.", "req": [], "fx": [["brood", "arrive", "locusts"], ["brood", "rel", -20], ["charm", 2]]},
+		"b": {"label": "Leave Out Seed", "desc": "A peace offering. Whatever stays behind will like you.", "req": [], "fx": [["brood", "arrive", "locusts"], ["brood", "rel", 30], ["wither", 2]]}},
+	# outreach
+	{"id": "brood_envoy", "title": "The Queen's Gift", "art": "i_queen1", "rarity": 0,
+		"text": "Six giant ants march up to the door carrying something wobbly and golden on a leaf.",
+		"a": {"label": "Accept the Jelly", "desc": "Royal jelly for the chest, a full heal, relations +20.", "req": [], "fx": [["loot", "royal_jelly", 1], ["heal", 40], ["brood", "rel", 20]]},
+		"b": {"label": "Ask for Pollinators", "desc": "Crops grow 1.5x for 15 min. Relations +10.", "req": [], "fx": [["buff", "growth", 900], ["brood", "rel", 10]]}},
+	{"id": "brood_war", "title": "Bugs vs. Greys", "art": "i_soldier1", "rarity": 3, "level": 1, "weird": 0,
+		"needs": [["insects", 3], ["aliens", 3]],
+		"text": "A mantis and an alien warden are staring at each other across the turnips. Neither blinks.",
+		"a": {"label": "Let Them Fight", "desc": "War between the brood and the aliens. Front lines!", "req": [], "fx": [["brood", "rel_aliens", -80], ["mood", 5]]},
+		"b": {"label": "Broker a Truce", "desc": "3 honey as a peace gift. Everyone likes you a bit more.", "req": [], "fx": [["item", "honey", -3], ["brood", "rel_aliens", 70], ["brood", "rel", 15], ["alien", "rel", 15]]}},
+	# living with giant insects
+	{"id": "locust_horizon", "title": "Ten Thousand Wings", "art": "i_locust2", "rarity": 2, "level": 1, "weird": 0,
+		"needs": [["insects", 4]],
+		"text": "A brown haze rises over the mounds. The locusts are restless and very, very hungry.",
+		"a": {"label": "Point at the Aliens", "desc": "Wave a flag. The swarm strips the alien village bare.", "req": [["aliens", 1]], "fx": [["brood", "swarm", "aliens"], ["alien", "rel", -15]]},
+		"b": {"label": "Open the Fields", "desc": "Let them eat the fields. They'll remember. Royal jelly.", "req": [], "fx": [["brood", "swarm", "farm"], ["brood", "rel", 35], ["loot", "royal_jelly", 1]]}},
+	{"id": "sinkhole_card", "title": "Sinkhole!", "art": "i_hole", "rarity": 2, "level": 1, "weird": 0,
+		"needs": [["insects", 3], ["mounds", 1]],
+		"text": "The ground near the tunnels sounds hollow when he stamps. He stops stamping.",
+		"a": {"label": "Fill Them In", "desc": "4 stone fills 8 tiles of tunnel near the house. The brood sulks.", "req": [], "fx": [["item", "stone", -4], ["brood", "fill", 8], ["brood", "rel", -15]]},
+		"b": {"label": "Make It a Pond", "desc": "Let it cave in. A new pond. Frogs. Joy.", "req": [], "fx": [["brood", "sinkhole", 4], ["mood", 15], ["brood", "rel", 10]]}},
+	{"id": "silk_trade", "title": "Silk Season", "art": "i_web", "rarity": 2, "level": 1, "weird": 0,
+		"needs": [["insects", 3], ["brood_rel", 0]],
+		"text": "The spinners have been busy. There is silk on everything, including the farmer.",
+		"a": {"label": "Buy Silk", "desc": "3 spools of silk; the brood eats well on the deal.", "req": [], "fx": [["loot", "silk", 3], ["brood", "food", 15], ["brood", "rel", 5]]},
+		"b": {"label": "Burn the Webs", "desc": "Every web goes up in flames. The spinners are furious.", "req": [], "fx": [["brood", "burn_webs"], ["brood", "rel", -15]]}},
+	{"id": "orange_stalks", "title": "Orange Stalks", "art": "i_fungus", "rarity": 2, "level": 1, "weird": 10,
+		"needs": [["insects", 6]],
+		"text": "A dead mantis has an orange stalk growing out of its head. There are more of them every day.",
+		"a": {"label": "Let It Spread", "desc": "Cordyceps rips through the brood. Spores drift to the aliens.", "req": [], "fx": [["brood", "bane", "cordyceps"], ["weird", 4]]},
+		"b": {"label": "Burn the Stalks", "desc": "The fungus is gone; the survivors molt and glow. Relations +20.", "req": [], "fx": [["brood", "cure_fungus"], ["brood", "rel", 20], ["brood", "boon", "molt"]]}},
+	{"id": "grub_roots", "title": "Grubs in the Turnips", "art": "i_grub1", "rarity": 2, "level": 1, "weird": 0,
+		"needs": [["insects", 2], ["tilled", 6]],
+		"text": "Something fat and pale is eating the turnips from below. Several somethings.",
+		"a": {"label": "Let the Hens Loose", "desc": "Two more hens and a grub feast. The brood is NOT happy.", "req": [], "fx": [["chicken", 2], ["brood", "food", -15], ["brood", "rel", -15]]},
+		"b": {"label": "Share the Roots", "desc": "Three crops lost; the brood grows fat and friendly.", "req": [], "fx": [["wither", 3], ["brood", "food", 25], ["brood", "rel", 25]]}},
+	{"id": "glowing_grubs", "title": "Glowing Grubs", "art": "i_grub1_glow", "rarity": 3, "level": 1, "weird": 10,
+		"needs": [["insects", 3], ["aliens", 3]],
+		"text": "The grubs near the alien creep have started to glow. They seem to like the moss. A lot.",
+		"a": {"label": "Feed Them Moss", "desc": "The whole brood molts into glowing giants. The aliens object.", "req": [], "fx": [["brood", "boon", "molt"], ["brood", "rel_aliens", -25], ["alien", "rel", -10]]},
+		"b": {"label": "Keep Them Apart", "desc": "Fences between the tunnels and the creep. Tensions ease.", "req": [], "fx": [["fence", 6], ["brood", "rel_aliens", 25], ["brood", "fill", 4]]}},
 ]

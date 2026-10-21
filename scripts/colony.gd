@@ -895,7 +895,7 @@ func _site_for(t: String) -> Variant:
 
 
 func _buildable(c: Vector2i, allow_debris: bool = true) -> bool:
-	if not world.in_bounds(c) or protected(c) or world.is_water(c) or world.is_path(c):
+	if not world.in_bounds(c) or protected(c) or world.is_water(c) or world.is_path(c) or world.insect_land.has(c):
 		return false
 	if world.crops.has(c):
 		return false
@@ -989,7 +989,7 @@ func _update_land(dt: float, mem: Array) -> void:
 
 ## The creep takes a cell: overgrowth becomes matter, fields go fallow, crops turn strange.
 func _creep(c: Vector2i) -> void:
-	if world.alien_land.has(c) or protected(c) or world.is_water(c):
+	if world.alien_land.has(c) or protected(c) or world.is_water(c) or world.insect_land.has(c):
 		return
 	world.alien_land[c] = true
 	var t := world.obj_type(c)

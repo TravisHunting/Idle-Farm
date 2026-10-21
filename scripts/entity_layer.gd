@@ -19,6 +19,8 @@ func _draw() -> void:
 			y += 20.0  # flyers draw above things around them
 		elif a is Alien and a.caste == "ship":
 			y += 1000.0
+		elif a is Insect and a.flying():
+			y += 24.0
 		items.append([y, "animal", a])
 	items.sort_custom(func(a, b): return a[0] < b[0])
 	for it in items:
@@ -89,6 +91,8 @@ func _tex_name(o: Dictionary) -> String:
 		return "tree_apple" if o.get("apple", false) else "tree"
 	if t == "a_moss":
 		return "a_moss" if float(o.get("g", 0.0)) >= 1.0 else "a_moss_young"
+	if t == "i_mound":
+		return "i_mound%d" % clampi(int(o.get("stage", 1)), 1, 3)
 	return t
 
 

@@ -6,4 +6,9 @@ extends SceneTree
 
 
 func _initialize() -> void:
-	root.add_child.call_deferred(load("res://tests/sim_runner.gd").new())
+	var runner: Script = load("res://tests/sim_runner.gd")
+	if runner == null or not runner.can_instantiate():
+		printerr("FAIL: tests/sim_runner.gd did not compile")
+		quit(1)
+		return
+	root.add_child.call_deferred(runner.new())

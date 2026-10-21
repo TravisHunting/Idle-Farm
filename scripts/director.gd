@@ -17,7 +17,7 @@ const WEATHER_DUR := {
 	"storm": Vector2(35, 70), "heat": Vector2(70, 140),
 }
 const FLAMMABLE := ["fence", "flowerbed", "bench", "sign", "scarecrow", "beehive", "tree", "weed", "stump", "coop",
-	"a_pod", "a_hatchery", "a_moss", "a_dish"]
+	"a_pod", "a_hatchery", "a_moss", "a_dish", "i_web", "i_comb"]
 
 var world: World
 var weather_fx: Node2D

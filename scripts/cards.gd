@@ -216,6 +216,27 @@ func check(r: Array) -> Array:
 			return [not Game.has_mutation(r[1]), "no %s" % String(Game.MUTATIONS[r[1]]["name"]).to_lower()]
 		"mutations":
 			return [Game.mutations.size() >= int(r[1]), "%d mutation%s (%d)" % [r[1], "" if int(r[1]) == 1 else "s", Game.mutations.size()]]
+		# ---- the Brood (swarm.gd)
+		"insects":
+			var ip: int = world.swarm.population() if world.swarm else 0
+			return [ip >= int(r[1]), "%d giant insects (%d)" % [r[1], ip]]
+		"no_insects":
+			var none2: bool = world.swarm == null or (not world.swarm.active() and world.swarm.members().is_empty())
+			return [none2, "no giant insects around"]
+		"brood_rel":
+			var bv := int(world.swarm.rel_farm()) if world.swarm else 0
+			return [bv >= int(r[1]), "brood relations %+d (%+d)" % [r[1], bv]]
+		"brood_rel_below":
+			var bv2 := int(world.swarm.rel_farm()) if world.swarm else 0
+			return [bv2 < int(r[1]), "brood relations below %+d (%+d)" % [r[1], bv2]]
+		"brood_war":
+			return [world.swarm != null and world.swarm.at_war(), "the brood at war with the aliens"]
+		"mounds":
+			var mn: int = world.count_obj("i_mound")
+			return [mn >= int(r[1]), "%d bug mound%s (%d)" % [r[1], "" if int(r[1]) == 1 else "s", mn]]
+		"water":
+			var wn: int = world.ground.count(World.G_WATER)
+			return [wn >= int(r[1]), "%d tiles of water (%d)" % [r[1], wn]]
 	return [true, ""]
 
 
@@ -523,6 +544,8 @@ func _apply_one(e: Array) -> void:
 					_lose_totem()
 		"alien":
 			_alien_fx(e)
+		"brood":
+			_brood_fx(e)
 
 
 ## ["alien", op, arg]: steer the alien colony (colony.gd).
@@ -572,6 +595,53 @@ func _alien_fx(e: Array) -> void:
 			col.boon(String(arg) if arg != null else "")
 		"bane":
 			col.bane(String(arg) if arg != null else "")
+
+
+## ["brood", op, arg]: steer the mutant insects (swarm.gd).
+func _brood_fx(e: Array) -> void:
+	var sw: Swarm = world.swarm
+	if sw == null:
+		return
+	var arg: Variant = e[2] if e.size() > 2 else null
+	match String(e[1]):
+		"arrive":
+			sw.arrive(String(arg) if arg != null else "")
+		"rel":
+			sw.change_rel(float(arg))
+		"rel_aliens":
+			sw.change_rel(0.0, float(arg))
+		"temper":
+			Game.brood["temper"] = clampf(float(Game.brood.get("temper", 0.5)) + float(arg), 0.0, 1.0)
+		"food":
+			sw.add_food(float(arg))
+		"swarm":
+			sw.launch_swarm(String(arg) if arg != null else "")
+		"flight":
+			sw.boon("flight")
+		"sinkhole":
+			var land: Array = world.insect_land.keys()
+			var at: Vector2i = land.pick_random() if land.size() > 0 else Vector2i(world.COLS / 2, world.ROWS - 4)
+			sw.sinkhole(at, int(arg) if arg != null else 2)
+		"fill":
+			# the farmer fills tunnels in, nearest the house first
+			var land2: Array = world.insect_land.keys()
+			land2.sort_custom(func(a, b): return Vector2(a).distance_to(Vector2(world.DOOR)) < Vector2(b).distance_to(Vector2(world.DOOR)))
+			for c in land2.slice(0, int(arg)):
+				if world.obj_type(c) != "i_mound":
+					world.insect_land.erase(c)
+					if world.obj_type(c) in ["i_web", "i_hole", "i_comb"]:
+						world.remove_obj(c)
+		"burn_webs":
+			for c in world.cells_with_obj(["i_web"]):
+				director.ignite(c)
+		"cure_fungus":
+			for c in world.cells_with_obj(["i_fungus"]):
+				world.remove_obj(c)
+				world.puff(world.center(c), Color("ef7d57"), 6)
+		"boon":
+			sw.boon(String(arg) if arg != null else "")
+		"bane":
+			sw.bane(String(arg) if arg != null else "")
 
 
 func _spawn(kind: String) -> void:
