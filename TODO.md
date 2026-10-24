@@ -92,6 +92,14 @@ changed drastically and lose territory). Four factions compete for the 12x22 far
   in-game days and a save/reload, prints a faction report every 12 in-game hours and exits
   non-zero on failure (~25s per 8 days). After adding a new `class_name` script, run
   `--headless --path . --import` once to refresh the global class cache.
+- **Multiplayer test:** `bash tests/run_net_test.sh` runs two headless copies on localhost (~50s): join,
+  play, host leaves, guest keeps a fork, roles swap, rejoin. `bash tests/run_click_test.sh` (~25s) does the
+  same flow through the real UI with synthetic clicks and keys (profiles 4 and 5). Windowed screenshots:
+  `-s tests/ui_shots.gd -- out=<folder>`, or the click test without `--headless` plus `out=<folder>`.
+- **Two players on one PC:** run a second standalone copy with `-- profile=2` (own settings and save
+  slots: `user://settings2.json`, `slot2_N.json`). Host in one (gear > HOST THIS FARM), join
+  `127.0.0.1:24680` in the other. Port: 24680 UDP (`"port"` in the settings file changes it); Windows asks
+  to allow the firewall the first time. Details: `MULTIPLAYER.md`.
 - MCP testing tip: `game_manage input_mouse` positions are in *window* pixels (2x the 192x432
   canvas in the editor's embedded view).
 - Export: see "Exporting" below.
@@ -104,6 +112,9 @@ changed drastically and lose territory). Four factions compete for the 12x22 far
 | `scripts/art_strange.gd` | Extra ASCII sprites: visitors (`v_*`), relic structures, card art, strange crops, 7x7 relic icons (`r_*`). |
 | `scripts/game.gd` (autoload **Game**) | Global state: coins, level, clock/day, weather, hand of cards + drip timer, weirdness, relics, unlocked crops, favoured crop, pending (delayed) effects, buffs, farmer stats, inventory, log; data tables CROPS, STRUCTS, RELICS; slot paths + settings file. |
 | `scripts/deck.gd` (class **Deck**) | **The card content** (70 cards, pure data). Its header documents every requirement and effect keyword. Add new cards here. |
+| `scripts/commands.gd` (class **Commands**) | Every player action as a command (`submit` / `execute(pid, cmd)`): play a card, move a card, card cadence, speed, debug keys. Validates everything (multiplayer, see `MULTIPLAYER.md`). |
+| `scripts/net.gd` (autoload **Net**) | Two-player networking over ENet: host/join, handshake, guest commands -> host, state snapshots + actor deltas + one-shot effects -> guest (puppet mode). See `MULTIPLAYER.md`. |
+| `scripts/text_entry.gd` (class **TextEntry**) | One-line text field for the pixel-font UI (join address, player name). |
 | `scripts/cards.gd` | **Card engine**: weighted drawing (rarity, level, weirdness, `needs`), requirement checks with progress text, auto-costs, effect interpreter (`apply`), gamble/delay, relic gain/loss + passives (daily/dawn/night hooks), companion actors. |
 | `scripts/welcome.gd` | Welcome screen: how-to-play page, then 3 save slots with summaries + delete. |
 | `scripts/main.gd` | Welcome -> slot -> builds the game tree in code (under GameRoot; torn down on menu), window docking (centred right with padding), per-slot save/load + offline progress, debug keys. |
@@ -274,6 +285,17 @@ Key systems added in v0.3:
 - [x] Comebacks: re-arrivals, wild floods back after the silence, the farmer breaks new ground
 - [x] Verified headless: forced cataclysms wipe each faction and both the farm and the wild return; long natural runs (see changelog)
 
+### v0.7: two-player "join world" (in progress)
+- [ ] Multiplayer: host-authoritative ENet + UPnP, join by IP, per-player card boxes, both keep a
+  copy when someone leaves. **Full plan, decisions and task checklist: `MULTIPLAYER.md`.**
+  - [x] Phase 0: player ids + profiles, per-player hands, command layer, actor ids, world ids, puppet mode
+  - [x] Phase 1: ENet net core (`net.gd`): handshake, commands, snapshots, actor stream, effects
+  - [x] Phase 2: when the host leaves the guest keeps a fork; rejoining restores hands; goodbye messages
+  - [x] Phase 3: UPnP port forwarding (thread), addresses to share, help text, join errors (real router untested)
+  - [x] Phase 4: UI: JOIN A FRIEND page, PLAY TOGETHER in the gear menu, 2P indicator, toasts, guest limits
+  - [x] Phase 5: two-copy tests (`run_net_test.sh`, `run_click_test.sh` click-through), docs
+  - [ ] Phase 5.3: a real internet test between two networks (needs a person on each end)
+
 ## Next up / ideas (not started)
 - [ ] Balance pass on the deck (reward sizes vs. level scaling; how fast weirdness climbs)
 - [ ] More follow-up chains (tome -> ritual -> ?, the homunculus grows up, the stranger's contract)
@@ -303,8 +325,34 @@ Key systems added in v0.3:
   missing ones draw magenta.
 - Calls on nodes typed as plain `Node` (e.g. `director.spawn_animal`) return Variant: give the
   variable an explicit type instead of `:=`.
+- Multiplayer: on a guest `Game.puppet` is true and nothing may change the world; gate new `_process`
+  logic with `Game.simulating()` and send player actions through `commands.submit()`. A new actor
+  field the guest must see goes in that actor's `net_fields()`. Never run the net test with `upnp=1`
+  (a real router port mapping) without the user's OK.
 
 ## Changelog
+- 2026-10-24 - v0.7 phase 5: `tests/run_click_test.sh` plays the multiplayer flow through the real UI (synthetic
+  clicks / drags / keys on two copies). Fixed one frame of simulation on a guest's streamed actors when leaving
+  a visit (farmer error). SHARED / SPLIT OFF tag moved off the house picture. `"port"` setting for hosting.
+- 2026-10-24 - v0.7 phase 4: multiplayer UI. Welcome > JOIN A FRIEND (name, address, slot for the copy with an
+  overwrite confirm), gear menu PLAY TOGETHER (name, host / copy address / stop, or leave a visit), "2P" in the
+  top bar, status toasts, guest-only limits, SHARED / SPLIT OFF slot tags. `tests/ui_shots.gd` for screenshots.
+- 2026-10-24 - v0.7 phase 3: hosting asks the router to forward the port (UPnP in a thread, unmapped on
+  stop), `Net.share_address/lan_addresses/help_lines/parse_address`, an 8s join timeout and clearer error
+  texts. Tests never touch the real router unless `upnp=1`.
+- 2026-10-24 - v0.7 phase 2: leaving works both ways. When the host goes the guest keeps the farm as its
+  own fork (`main.host_left`) and can host it; a returning player gets their hand back; `Net.stop` says
+  goodbye (`_bye`, `Net.last_exit`); window close says goodbye too. Net test is now a full role-swap scenario.
+- 2026-10-24 - v0.7 phase 1: `scripts/net.gd` (autoload Net): ENet host/join with ZSTD, hello/reject
+  handshake, guest commands over RPC, 1/s state snapshots (when changed), 5/s actor deltas with
+  interpolation, replayed one-shot effects, guest clock smoothing; `main.start_guest`; two-copy test
+  `tests/run_net_test.sh` (6 KB/s on the wire with 21 actors).
+- 2026-10-24 - v0.7 phase 0 (multiplayer prep, single player unchanged): `Game.hands` per player
+  (save v4 migrates old saves), `scripts/commands.gd` command layer (HUD + debug keys go through it),
+  stable actor `uid`s, `world_id`/`fork()`, `Game.puppet` gate on every sim loop, `-- profile=N` for two
+  copies on one PC. New sim_test section. Note: sim_test was already flaky on a few faction checks.
+- 2026-10-24 - planned v0.7 multiplayer (two players share one world, host-authoritative over
+  ENet + UPnP, join by IP; no merging, both keep a copy on leave). Plan + checklist in `MULTIPLAYER.md`.
 - 2026-10-21 - v0.6: cataclysms. The tides can now wipe any faction out completely (hive-sickness /
   recall, the long frost, the scorching, the dark harvest), aimed mostly at the dominant faction;
   extinctions and returns are tracked and logged, the wild falls silent and then floods back, and

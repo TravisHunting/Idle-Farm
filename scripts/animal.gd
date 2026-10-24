@@ -14,6 +14,8 @@ const THREATS := ["crow", "rabbit", "fox", "boar", "snake", "wasps"]
 const FACES_LEFT := ["rabbit", "fox", "boar", "chicken", "dog", "goat"]
 
 var world  # World
+var uid := 0      # stable actor id (World.new_uid), used to match actors across the network
+var net_to := Vector2.INF   # on a guest: where the host says this actor is
 var kind := ""
 var pos := Vector2.ZERO
 var state := "enter"
@@ -41,6 +43,7 @@ var job: Variant = null
 
 func _init(w, k: String, p: Vector2) -> void:
 	world = w
+	uid = w.new_uid()
 	kind = k
 	pos = p
 	home = p
@@ -437,7 +440,7 @@ func _update_merchant(d: float) -> void:
 				else:
 					say("Nothing to trade? Next time!")
 				if randf() < 0.3:
-					Game.draw_requested.emit()
+					Game.draw_requested.emit("")
 					Game.add_log("The merchant left a card on the step.")
 				_leave()
 		"leave":
@@ -674,8 +677,24 @@ func draw(ci: CanvasItem) -> void:
 
 
 func to_dict() -> Dictionary:
-	return {"kind": kind, "x": pos.x, "y": pos.y, "hx": home.x, "hy": home.y}
+	return {"uid": uid, "kind": kind, "x": pos.x, "y": pos.y, "hx": home.x, "hy": home.y}
 
 
 func from_dict(d: Dictionary) -> void:
+	uid = int(d.get("uid", uid))
 	home = Vector2(float(d.get("hx", pos.x)), float(d.get("hy", pos.y)))
+
+
+# ---------------------------------------------------------------- multiplayer
+## What a guest needs to draw this actor (Net's actor stream). Timers in Net.DECAYING also run
+## down on the guest by themselves.
+func net_fields() -> Array:
+	return ["pos", "state", "flip", "dead", "hidden", "tint", "sprite", "bubble", "bubble_t"]
+
+
+## A guest's stand-in for update(): animate, run timers down, glide towards the host's position.
+func net_tick(d: float) -> void:
+	anim_t += d
+	bubble_t -= d
+	if net_to.x != INF:
+		pos = pos.lerp(net_to, minf(1.0, d * 8.0))

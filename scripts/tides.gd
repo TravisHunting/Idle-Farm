@@ -62,7 +62,7 @@ func _ensure() -> void:
 
 
 func _process(delta: float) -> void:
-	if not Game.running or world == null:
+	if not Game.simulating() or world == null:
 		return
 	var d := delta * Game.time_scale
 	if not Game.tides.has("cata_t"):

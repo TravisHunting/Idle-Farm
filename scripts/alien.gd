@@ -566,3 +566,7 @@ func from_dict(d: Dictionary) -> void:
 	lifespan = float(d.get("life", lifespan))
 	grow_at = float(d.get("grow", grow_at))
 	alien_name = String(d.get("name", alien_name))
+
+
+func net_fields() -> Array:
+	return super() + ["caste", "age", "grow_at", "alien_name", "cargo", "spotted"]

@@ -51,6 +51,16 @@ const LINES := {
 }
 
 var world  # World
+var uid := 0      # stable actor id (World.new_uid), used to match actors across the network
+var net_to := Vector2.INF   # on a guest: where the host says the farmer is
+## The tool in his hands (only drawn while working); a plain property for Net's actor stream.
+var net_tool: String:
+	get: return String(task.get("tool", ""))
+	set(v):
+		if v == "":
+			task.erase("tool")
+		else:
+			task["tool"] = v
 var pos := Vector2.ZERO
 var state := "idle"
 var task: Dictionary = {}
@@ -75,6 +85,7 @@ var _last_weather := ""
 
 func _init(w) -> void:
 	world = w
+	uid = w.new_uid()
 
 
 func cell() -> Vector2i:
@@ -333,7 +344,8 @@ func on_click() -> void:
 	if state == "abducted":
 		return
 	say_line("click")
-	Game.mood = minf(100.0, Game.mood + 1.0)
+	if not Game.puppet:
+		Game.mood = minf(100.0, Game.mood + 1.0)
 
 
 func _drop_carry() -> void:
@@ -1140,7 +1152,7 @@ func _draw_mutations(ci: CanvasItem, bob: float) -> void:
 
 # ---------------------------------------------------------------- save
 func to_dict() -> Dictionary:
-	return {"x": pos.x, "y": pos.y, "carrying": carrying, "carry": carry_data,
+	return {"uid": uid, "x": pos.x, "y": pos.y, "carrying": carrying, "carry": carry_data,
 		"sleep": state == "sleep", "fainted": state == "fainted", "faint_t": faint_t,
 		"abducted": work_t if state == "abducted" else 0.0}
 
@@ -1148,6 +1160,7 @@ func to_dict() -> Dictionary:
 func from_dict(d: Dictionary) -> void:
 	if d.is_empty():
 		return
+	uid = int(d.get("uid", uid))
 	pos = Vector2(float(d.get("x", pos.x)), float(d.get("y", pos.y)))
 	carrying = String(d.get("carrying", ""))
 	carry_data = d.get("carry", {})
@@ -1162,3 +1175,19 @@ func from_dict(d: Dictionary) -> void:
 		faint_t = float(d.get("faint_t", 20.0))
 	elif float(d.get("abducted", 0.0)) > 0.0:
 		abduct(float(d["abducted"]))
+
+
+# ---------------------------------------------------------------- multiplayer
+## What a guest needs to draw this actor (Net's actor stream). Timers in Net.DECAYING also run
+## down on the guest by themselves.
+func net_fields() -> Array:
+	return ["pos", "state", "flip", "hidden", "bubble", "bubble_t", "carrying", "hurt_t", "activity", "net_tool"]
+
+
+## A guest's stand-in for update(): animate, run timers down, glide towards the host's position.
+func net_tick(d: float) -> void:
+	anim_t += d
+	bubble_t -= d
+	hurt_t = maxf(0.0, hurt_t - d)
+	if net_to.x != INF:
+		pos = pos.lerp(net_to, minf(1.0, d * 8.0))

@@ -36,6 +36,7 @@ var world: World
 var director: Node
 var cards: Node
 var main: Node
+var commands: Commands
 
 var hover_slot := []          # ["box"|"stash", i] or []
 var hover_btn := ""
@@ -54,6 +55,9 @@ var mouse := Vector2.ZERO
 var pulse := {}
 var trash_anim := {}          # {id, t}
 var log_flash := 0.0
+var name_entry := TextEntry.new(12, TextEntry.NAME)
+var name_focus := false
+var toast := {}               # {text, t}: a multiplayer message shown over the farm for a few seconds
 var t := 0.0
 var btns := {
 	"menu": Rect2(136, 3, 9, 9),
@@ -71,6 +75,12 @@ func _ready() -> void:
 	Game.card_trashed.connect(_on_card_trashed)
 	Game.log_added.connect(_on_log)
 	Game.cards_changed.connect(_on_cards_changed)
+	Net.status_changed.connect(_on_net_status)
+	name_entry.set_text(String(Game.settings.get("name", "")))
+
+
+func _on_net_status(text: String) -> void:
+	toast = {"text": text, "t": 5.0}
 
 
 func _on_card_arrived(id: String) -> void:
@@ -112,6 +122,10 @@ func _process(delta: float) -> void:
 		if trash_anim["t"] > 1.2:
 			trash_anim = {}
 	log_flash = maxf(0.0, log_flash - delta)
+	if not toast.is_empty():
+		toast["t"] -= delta
+		if toast["t"] <= 0.0:
+			toast = {}
 	queue_redraw()
 
 
@@ -141,15 +155,33 @@ func _modal_rects() -> Dictionary:
 
 func _settings_rects() -> Dictionary:
 	var y := PANEL.position.y
-	return {
+	var r := {
 		"min_down": Rect2(100, y + 30, 11, 11), "min_up": Rect2(170, y + 30, 11, 11),
 		"dock_side": Rect2(100, y + 52, 81, 11),
 		"next_now": Rect2(100, y + 74, 81, 11),
-		"done": Rect2(66, y + 176, 60, 14),
+		"name": Rect2(100, y + 108, 81, 11),
+		"done": Rect2(66, y + 244, 60, 14),
 	}
+	match Net.mode:
+		"hosting":
+			r["copy"] = Rect2(12, y + 224, 80, 13)
+			r["stop_host"] = Rect2(100, y + 224, 81, 13)
+		"guest":
+			r["leave"] = Rect2(12, y + 224, 169, 13)
+		_:
+			r["host"] = Rect2(12, y + 126, 169, 13)
+	return r
 
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventKey and settings_open and name_focus:
+		get_viewport().set_input_as_handled()
+		var res := name_entry.key(event)
+		if res == "edit" or res == "submit":
+			_save_name()
+		if res == "submit" or (event.pressed and event.keycode in [KEY_ESCAPE, KEY_TAB]):
+			name_focus = false
+		return
 	if event is InputEventMouseMotion:
 		mouse = event.position
 		if dragging:
@@ -188,7 +220,7 @@ func _press(p: Vector2) -> void:
 		if hover_choice != "":
 			var c: Dictionary = cards.card(open_id)
 			if cards.can_choose(c, hover_choice):
-				cards.choose(open_where, open_i, hover_choice)
+				commands.submit({"type": "choose", "where": open_where, "i": open_i, "which": hover_choice})
 				_close_modal()
 			return
 		if hover_btn == "later":
@@ -231,7 +263,7 @@ func _release(p: Vector2) -> void:
 		card_drag = false
 		var to := _slot_at(p)
 		if not to.is_empty():
-			Game.move_card(from[0], from[1], to[0], to[1])
+			commands.submit({"type": "move_card", "from": from[0], "fi": from[1], "to": to[0], "ti": to[1]})
 		return
 	_open(from[0], from[1])
 
@@ -259,25 +291,51 @@ func _move_open_card() -> void:
 	var free := arr.find("")
 	if free < 0:
 		return
-	Game.move_card(open_where, open_i, other, free)
+	commands.submit({"type": "move_card", "from": open_where, "fi": open_i, "to": other, "ti": free})
+
+
+## The player's name: kept in settings, shown in the log ("TRAVIS chose ...") and to the friend.
+func _save_name() -> void:
+	var nm := name_entry.text.strip_edges()
+	Game.settings["name"] = nm
+	Game.save_settings()
+	if not Game.puppet and nm != "":
+		Game.hand()["name"] = nm
 
 
 func _settings_click(p: Vector2) -> void:
 	var r := _settings_rects()
+	name_focus = r["name"].has_point(p)
+	if name_focus:
+		return
+	if r.has("host") and r["host"].has_point(p):
+		Net.host(int(Game.settings.get("port", Net.PORT)))   # "port" in the settings file, if 24680 is taken
+		return
+	if r.has("stop_host") and r["stop_host"].has_point(p):
+		Net.stop()
+		return
+	if r.has("copy") and r["copy"].has_point(p):
+		Net.copy_address()
+		toast = {"text": "Copied %s. Send it to your friend." % Net.share_address(), "t": 4.0}
+		return
+	if r.has("leave") and r["leave"].has_point(p):
+		settings_open = false
+		main.back_to_menu()
+		return
+	if Game.puppet and (r["min_down"].has_point(p) or r["min_up"].has_point(p) or r["next_now"].has_point(p)):
+		return   # the host's world, the host's rules
 	var opts: Array = Game.CARD_MINUTES
 	var cur := opts.find(int(Game.settings.get("card_minutes", Game.DEFAULT_CARD_MINUTES)))
 	if cur < 0:
 		cur = opts.find(Game.DEFAULT_CARD_MINUTES)
 	if r["min_down"].has_point(p):
-		Game.settings["card_minutes"] = opts[maxi(0, cur - 1)]
-		Game.save_settings()
+		commands.submit({"type": "card_minutes", "n": opts[maxi(0, cur - 1)]})
 	elif r["min_up"].has_point(p):
-		Game.settings["card_minutes"] = opts[mini(opts.size() - 1, cur + 1)]
-		Game.save_settings()
+		commands.submit({"type": "card_minutes", "n": opts[mini(opts.size() - 1, cur + 1)]})
 	elif r["dock_side"].has_point(p):
 		main.toggle_dock()
 	elif r["next_now"].has_point(p) and OS.is_debug_build():
-		Game.card_timer = Game.card_interval()
+		commands.submit({"type": "debug", "key": "next_card"})
 	elif r["done"].has_point(p) or not PANEL.has_point(p):
 		settings_open = false
 
@@ -363,6 +421,19 @@ func _draw() -> void:
 	_draw_top()
 	_draw_status()
 	_draw_tray()
+	_draw_toast()
+
+
+func _draw_toast() -> void:
+	if toast.is_empty() or settings_open:   # the settings panel shows the same news
+		return
+	var lines := Art.wrap(String(toast["text"]).to_upper(), 44)
+	var h := lines.size() * 8 + 6
+	var a := clampf(float(toast["t"]) * 2.0, 0.0, 1.0)
+	draw_rect(Rect2(4, FARM_Y + 3, 184, h), Color(C_BG, 0.85 * a))
+	draw_rect(Rect2(4, FARM_Y + 3, 184, 1), Color(C_GREEN, a))
+	for i in lines.size():
+		Art.draw_text(self, lines[i], Vector2(8, FARM_Y + 7 + i * 8), Color(C_TEXT, a), Color(0, 0, 0, 0.6 * a))
 
 
 func _draw_world_overlays() -> void:
@@ -481,26 +552,52 @@ func _draw_settings() -> void:
 	_ctxt("SETTINGS", y + 6, C_GOLD)
 	_txt("NEW CARD EVERY", Vector2(12, y + 33), C_TEXT)
 	var mins := int(Game.settings.get("card_minutes", Game.DEFAULT_CARD_MINUTES))
-	_button(r["min_down"], "<", hover_btn == "min_down")
-	_button(r["min_up"], ">", hover_btn == "min_up")
-	var ms := "%d MIN" % mins
-	_txt(ms, Vector2(141 - Art.text_width(ms) / 2.0, y + 33), C_GOLD)
+	var own := not Game.puppet
+	_button(r["min_down"], "<", hover_btn == "min_down", own)
+	_button(r["min_up"], ">", hover_btn == "min_up", own)
+	var ms := "%d MIN" % mins if own else "HOST'S"
+	_txt(ms, Vector2(141 - Art.text_width(ms) / 2.0, y + 33), C_GOLD if own else C_DIM)
 	_txt("WINDOW SIDE", Vector2(12, y + 55), C_TEXT)
 	_button(r["dock_side"], Game.settings.get("dock", "right").to_upper(), hover_btn == "dock_side")
 	_txt("NEXT CARD", Vector2(12, y + 77), C_TEXT)
-	_button(r["next_now"], "NOW (DEBUG)" if OS.is_debug_build() else "SKIP WAIT", hover_btn == "next_now", OS.is_debug_build())
-	var notes := [
-		"A NEW CARD SLIDES INTO THE BOX",
-		"EVERY FEW MINUTES OF REAL TIME.",
-		"THE BOX HOLDS 3: THE OLDEST CARD",
-		"FALLS OUT WHEN A NEW ONE ARRIVES.",
-		"",
-		"DRAG CARDS INTO THE STASH TO KEEP",
-		"THEM SAFE UNTIL YOU CAN PLAY THEM.",
-	]
-	for i in notes.size():
-		_txt(notes[i], Vector2(12, y + 100 + i * 9), C_DIM)
+	_button(r["next_now"], "NOW (DEBUG)" if OS.is_debug_build() else "SKIP WAIT", hover_btn == "next_now", OS.is_debug_build() and own)
+	_draw_together(r, y + 94)
 	_button(r["done"], "DONE", hover_btn == "done")
+
+
+## The settings panel's multiplayer part: name, host / stop / copy address, or leave a visit.
+func _draw_together(r: Dictionary, y: float) -> void:
+	draw_rect(Rect2(12, y, 169, 1), C_EDGE)
+	_txt("PLAY TOGETHER", Vector2(12, y + 4), C_GOLD)
+	_txt("YOUR NAME", Vector2(12, y + 16), C_TEXT)
+	name_entry.draw(self, r["name"], name_focus, t, "FRIEND")
+	var ly := y + 48.0
+	var lines: Array = []
+	match Net.mode:
+		"hosting":
+			var who := "%s IS HERE!" % Game.player_name(Net.guest_pid) if Net.guest_pid != "" else "WAITING FOR YOUR FRIEND..."
+			lines.append([who, C_GREEN])
+			lines.append(["", C_DIM])
+			for h in Net.help_lines():
+				for l in Art.wrap(String(h).to_upper(), 42):
+					lines.append([l, C_TEXT if l.begins_with("FRIEND TYPES") else C_DIM])
+			_button(r["copy"], "COPY ADDRESS", hover_btn == "copy")
+			_button(r["stop_host"], "STOP HOSTING", hover_btn == "stop_host")
+		"guest":
+			lines.append(["VISITING %s'S FARM." % Game.player_name(Game.owner_pid), C_GREEN])
+			lines.append(["", C_DIM])
+			for l in ["YOUR CARDS ARE YOUR OWN. THE", "HOST'S FARM RUNS ON THEIR PC.",
+					"", "LEAVING KEEPS A COPY OF THIS FARM", "IN YOUR FARM %d SLOT." % Game.slot]:
+				lines.append([l, C_DIM])
+			_button(r["leave"], "LEAVE (KEEP A COPY)", hover_btn == "leave")
+		_:
+			ly = y + 50.0
+			_button(r["host"], "HOST THIS FARM", hover_btn == "host")
+			for l in ["LET A FRIEND JOIN THIS FARM. THEY", "PICK JOIN A FRIEND ON THEIR", "WELCOME SCREEN AND TYPE THE", "ADDRESS SHOWN HERE. EACH OF YOU",
+					"GETS YOUR OWN CARDS, AND BOTH", "KEEP A COPY OF THE FARM."]:
+				lines.append([l, C_DIM])
+	for i in lines.size():
+		_txt(lines[i][0], Vector2(12, ly + i * 8), lines[i][1])
 
 
 func _draw_farmer_panel() -> void:
@@ -630,6 +727,11 @@ func _draw_top() -> void:
 	var wicon: String = "ic_moon" if Game.is_night() and Game.weather in ["sunny", "heat"] else {
 		"sunny": "ic_sun", "cloudy": "ic_cloud", "rain": "ic_rain", "storm": "ic_storm", "heat": "ic_heat"}[Game.weather]
 	draw_texture(Art.tex(wicon), Vector2(106, 0))
+	# multiplayer: who's here
+	# "2P": green with two players on the farm, blinking while hosting and waiting for the friend
+	var together := Net.is_guest() or (Net.mode == "hosting" and Net.guest_pid != "")
+	if together or (Net.mode == "hosting" and int(t * 1.5) % 2 == 0):
+		_txt("2P", Vector2(125, 5), C_GREEN if together else C_DIM)
 	for k in btns:
 		var r: Rect2 = btns[k]
 		draw_rect(r, C_EDGE if hover_btn == k or (k == "gear" and settings_open) else C_SLOT)

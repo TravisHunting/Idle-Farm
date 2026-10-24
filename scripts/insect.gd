@@ -375,3 +375,7 @@ func from_dict(d: Dictionary) -> void:
 	var parts := String(d.get("hive", "-1,-1")).split(",")
 	if parts.size() == 2:
 		hive = Vector2i(int(parts[0]), int(parts[1]))
+
+
+func net_fields() -> Array:
+	return super() + ["caste", "glow", "cargo"]

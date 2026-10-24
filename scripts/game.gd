@@ -11,13 +11,12 @@ signal log_added(text: String)
 signal cards_changed
 signal card_arrived(id: String)
 signal card_trashed(id: String)
-signal draw_requested
+signal draw_requested(pid: String)   # a timed card for that player ("" = owner / acting player)
 signal weather_changed(w: String)
 signal chest_changed
 signal new_day(day: int)
 
 const SLOT_COUNT := 3
-const SETTINGS_PATH := "user://settings.json"
 const DAY_LENGTH := 480.0            # real seconds per in-game day
 const BOX_SIZE := 3                  # new cards enter the box on the left, the far-right one is trashed
 const STASH_SIZE := 3                # cards the player keeps safe
@@ -215,15 +214,30 @@ const TOTEMS_MAX := 6
 const WEATHER_NAMES := {"sunny": "Sunny", "cloudy": "Cloudy", "rain": "Rain", "storm": "Storm", "heat": "Heatwave"}
 
 var running := false     # false while the welcome screen is up
+var puppet := false      # a guest in a shared world: shows the host's state, simulates nothing
 var slot := 1
 var chest := {}          # treasure id -> count (see TREASURES)
 var total_found := 0     # worth of every treasure ever found: sets the farm level
 var day := 1
 var time_of_day := 0.27
 var weather := "sunny"
-var box: Array = ["", "", ""]     # card box: new cards push in from the left, the right one is trashed
-var stash: Array = ["", "", ""]   # cards the player keeps safe ("" = empty slot)
-var card_timer := 0.0             # seconds since the last arrival
+var hands := {}          # pid -> {box, stash, card_timer[, name]}: each player's own pool of cards
+var owner_pid := ""      # whose world this is (the host / the solo player)
+var world_id := ""       # this world's id; a copy that goes its own way gets a new one
+var forked_from := ""    # the world_id this one was copied from ("" = an original)
+var present := {}        # pids playing right now: only their cards drip in (not saved)
+var acting_pid := ""     # whose action is being applied: cards it causes go to them ("" = the owner)
+## The local player's card box (new cards push in from the left, the right one is trashed),
+## stash (cards kept safe, "" = empty slot) and seconds since the last arrival.
+var box: Array:
+	get: return hand()["box"]
+	set(v): hand()["box"] = v
+var stash: Array:
+	get: return hand()["stash"]
+	set(v): hand()["stash"] = v
+var card_timer: float:
+	get: return float(hand()["card_timer"])
+	set(v): hand()["card_timer"] = v
 var perks := {}          # id -> true (farmer abilities)
 var friends := {}        # id -> true (townsfolk)
 var totems := 0          # dark totems found (0..TOTEMS_MAX)
@@ -252,13 +266,29 @@ var tides := {}          # faction balance history + timers (tides.gd)
 var brood := {}          # the mutant insects' state (swarm.gd)
 var settings := {"dock": "right", "card_minutes": DEFAULT_CARD_MINUTES, "speed": 1}
 var time_scale := 1.0    # game speed (fast forward), from settings["speed"]
+var profile := ""        # "" or "_p2".. (`-- profile=N`): separate settings + slots, for two copies on one PC
+var my_pid := ""         # this player's id (settings["pid"]), see MULTIPLAYER.md
 var play_seconds := 0.0
 var _defaults := {}
 
 
 func _ready() -> void:
-	_defaults = to_dict().duplicate(true)
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("profile=") and int(a.substr(8)) > 1:
+			profile = "_p%d" % int(a.substr(8))
 	_load_settings()
+	if String(settings.get("pid", "")) == "":
+		settings["pid"] = new_id()
+		save_settings()
+	my_pid = String(settings["pid"])
+	_defaults = to_dict().duplicate(true)
+
+
+## A random 16-hex id (player ids, world ids).
+func new_id() -> String:
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	return "%08x%08x" % [rng.randi(), rng.randi()]
 
 
 ## Back to a brand-new game.
@@ -267,8 +297,6 @@ func reset() -> void:
 	from_dict(_defaults.duplicate(true))
 	settings = keep
 	stats = {"harvested": 0, "shooed": 0, "cards": 0, "faints": 0, "built": 0}
-	box = ["", "", ""]
-	stash = ["", "", ""]
 	relics = {}
 	unlocked = {}
 	pending = []
@@ -287,7 +315,11 @@ func reset() -> void:
 
 
 func _process(delta: float) -> void:
-	if not running:
+	if running and puppet:
+		# a guest's clock keeps ticking between the host's snapshots (cosmetic only)
+		time_of_day = fmod(time_of_day + delta * time_scale / DAY_LENGTH, 1.0)
+		return
+	if not simulating():
 		return
 	var d := delta * time_scale
 	play_seconds += delta
@@ -300,14 +332,21 @@ func _process(delta: float) -> void:
 		new_day.emit(day)
 	if prev < 0.25 and time_of_day >= 0.25:
 		add_log("The sun rises.")
-	card_timer += d
-	if card_timer >= card_interval():
-		card_timer = 0.0
-		draw_requested.emit()
+	for p in present:
+		var h := hand(p)
+		h["card_timer"] = float(h["card_timer"]) + d
+		if h["card_timer"] >= card_interval():
+			h["card_timer"] = 0.0
+			draw_requested.emit(p)
 	for k in buffs.keys():
 		buffs[k] -= d
 		if buffs[k] <= 0.0:
 			buffs.erase(k)
+
+
+## Should this machine run the simulation? (not on the welcome screen, not as a guest)
+func simulating() -> bool:
+	return running and not puppet
 
 
 # ---------------------------------------------------------------- time
@@ -547,23 +586,63 @@ func next_card_left() -> float:
 	return maxf(0.0, card_interval() - card_timer)
 
 
+## This copy of the world goes its own way, owned by the local player (a guest keeping the
+## shared world after the host left, or opening a slot that was saved as someone's guest).
+func fork() -> void:
+	forked_from = world_id
+	world_id = new_id()
+	owner_pid = my_pid
+	hand()
+
+
+## A player's cards ("" = the local player), created empty on first use.
+func hand(pid: String = "") -> Dictionary:
+	if pid == "":
+		pid = my_pid
+	if not hands.has(pid):
+		hands[pid] = {"box": _slots([], BOX_SIZE), "stash": _slots([], STASH_SIZE), "card_timer": 0.0}
+	return hands[pid]
+
+
+## Who gets a card nobody asked for: the given player, else whoever's action caused it, else the owner.
+func card_target(pid: String = "") -> String:
+	if pid != "":
+		return pid
+	if acting_pid != "" and hands.has(acting_pid):
+		return acting_pid
+	return owner_pid if owner_pid != "" else my_pid
+
+
+func player_name(pid: String) -> String:
+	var n := String(hand(pid).get("name", ""))
+	if n != "":
+		return n
+	return "PLAYER 1" if pid == owner_pid else "PLAYER 2"
+
+
 ## A new card enters the box on the left and pushes the others right (into the first gap);
 ## with no gap, the far-right card falls out and is trashed.
-func add_card(id: String) -> bool:
+func add_card(id: String, pid: String = "") -> bool:
 	if id == "":
 		return false
-	var gap := box.find("")
+	pid = card_target(pid)
+	var b: Array = hand(pid)["box"]
+	var gap := b.find("")
 	if gap < 0:
-		var gone: String = box[BOX_SIZE - 1]
+		var gone: String = b[BOX_SIZE - 1]
 		gap = BOX_SIZE - 1
-		add_log("A card fell out of the box: %s." % gone_title(gone))
-		card_trashed.emit(gone)
+		if pid == my_pid:
+			add_log("A card fell out of the box: %s." % gone_title(gone))
+			card_trashed.emit(gone)
+		else:
+			add_log("A card fell out of %s's box: %s." % [player_name(pid), gone_title(gone)])
 	for i in range(gap, 0, -1):
-		box[i] = box[i - 1]
-	box[0] = id
+		b[i] = b[i - 1]
+	b[0] = id
 	seen[id] = int(seen.get(id, 0)) + 1
 	cards_changed.emit()
-	card_arrived.emit(id)
+	if pid == my_pid:
+		card_arrived.emit(id)
 	return true
 
 
@@ -575,18 +654,28 @@ func gone_title(id: String) -> String:
 	return String(title_of.call(id)) if title_of.is_valid() else id
 
 
+## Anyone holding this card? (so the same card is never in two places)
 func has_card(id: String) -> bool:
-	return id != "" and (id in box or id in stash)
+	if id == "":
+		return false
+	for p in hands:
+		if id in hands[p]["box"] or id in hands[p]["stash"]:
+			return true
+	return false
 
 
-func card_at(where: String, i: int) -> String:
-	var arr: Array = box if where == "box" else stash
+func _slots_of(where: String, pid: String) -> Array:
+	return hand(pid)["box" if where == "box" else "stash"]
+
+
+func card_at(where: String, i: int, pid: String = "") -> String:
+	var arr := _slots_of(where, pid)
 	return String(arr[i]) if i >= 0 and i < arr.size() else ""
 
 
 ## Empties a slot after a card was played.
-func take_card(where: String, i: int) -> void:
-	var arr: Array = box if where == "box" else stash
+func take_card(where: String, i: int, pid: String = "") -> void:
+	var arr := _slots_of(where, pid)
 	if i >= 0 and i < arr.size() and arr[i] != "":
 		arr[i] = ""
 		stats["cards"] = int(stats["cards"]) + 1
@@ -594,11 +683,11 @@ func take_card(where: String, i: int) -> void:
 
 
 ## Moves (or swaps) a card between any two slots of the box/stash.
-func move_card(from_where: String, fi: int, to_where: String, ti: int) -> void:
+func move_card(from_where: String, fi: int, to_where: String, ti: int, pid: String = "") -> void:
 	if from_where == to_where and fi == ti:
 		return
-	var a: Array = box if from_where == "box" else stash
-	var b: Array = box if to_where == "box" else stash
+	var a := _slots_of(from_where, pid)
+	var b := _slots_of(to_where, pid)
 	if fi < 0 or ti < 0 or fi >= a.size() or ti >= b.size():
 		return
 	var tmp: String = b[ti]
@@ -607,9 +696,10 @@ func move_card(from_where: String, fi: int, to_where: String, ti: int) -> void:
 	cards_changed.emit()
 
 
-func card_count() -> int:
+func card_count(pid: String = "") -> int:
 	var n := 0
-	for id in box + stash:
+	var h := hand(pid)
+	for id in h["box"] + h["stash"]:
 		if id != "":
 			n += 1
 	return n
@@ -661,29 +751,33 @@ func set_speed(n: int) -> void:
 
 
 func save_settings() -> void:
-	var fa := FileAccess.open(SETTINGS_PATH, FileAccess.WRITE)
+	var fa := FileAccess.open(settings_path(), FileAccess.WRITE)
 	if fa:
 		fa.store_string(JSON.stringify(settings))
 
 
 func _load_settings() -> void:
-	if not FileAccess.file_exists(SETTINGS_PATH):
+	if not FileAccess.file_exists(settings_path()):
 		return
-	var p: Variant = JSON.parse_string(FileAccess.get_file_as_string(SETTINGS_PATH))
+	var p: Variant = JSON.parse_string(FileAccess.get_file_as_string(settings_path()))
 	if typeof(p) == TYPE_DICTIONARY:
 		for k in p:
 			settings[k] = p[k]
 	time_scale = float(settings.get("speed", 1))
 
 
+func settings_path() -> String:
+	return "user://settings%s.json" % profile
+
+
 func slot_path(n: int) -> String:
-	return "user://slot_%d.json" % n
+	return "user://slot%s_%d.json" % [profile, n]
 
 
 func to_dict() -> Dictionary:
 	return {
 		"chest": chest, "total_found": total_found, "sagas": sagas, "day": day, "time_of_day": time_of_day,
-		"weather": weather, "box": box, "stash": stash, "card_timer": card_timer,
+		"weather": weather, "hands": hands, "owner_pid": owner_pid,
 		"perks": perks, "friends": friends, "totems": totems, "played": played, "quirk": quirk,
 		"farm_name": farm_name,
 		"inventory": inventory, "buffs": buffs, "charms": charms, "health": health, "energy": energy,
@@ -691,6 +785,7 @@ func to_dict() -> Dictionary:
 		"relics": relics, "unlocked": unlocked, "favor_crop": favor_crop, "pending": pending,
 		"seen": seen, "play_seconds": play_seconds,
 		"colony": colony, "mutations": mutations, "tides": tides, "brood": brood,
+		"world_id": world_id, "forked_from": forked_from,
 	}
 
 
@@ -704,6 +799,10 @@ func from_dict(d: Dictionary) -> void:
 	# saves from before the chest: grandpa's old coins become trinkets
 	if d.has("coins") and not d.has("chest"):
 		gain_trinkets(int(d["coins"]), false)
+	world_id = String(d.get("world_id", ""))
+	if world_id == "":
+		world_id = new_id()   # a brand-new game, or a save from before world ids
+	forked_from = String(d.get("forked_from", ""))
 	sagas = d.get("sagas", {})
 	colony = d.get("colony", {})
 	mutations = d.get("mutations", {})
@@ -712,9 +811,23 @@ func from_dict(d: Dictionary) -> void:
 	day = int(d.get("day", day))
 	time_of_day = float(d.get("time_of_day", time_of_day))
 	weather = String(d.get("weather", weather))
-	box = _slots(d.get("box", d.get("hand", [])), BOX_SIZE)
-	stash = _slots(d.get("stash", []), STASH_SIZE)
-	card_timer = float(d.get("card_timer", 0.0))
+	owner_pid = String(d.get("owner_pid", ""))
+	if owner_pid == "":
+		owner_pid = my_pid
+	hands = {}
+	if d.has("hands"):
+		var hs: Dictionary = d["hands"]
+		for p in hs:
+			var h: Dictionary = hs[p]
+			hands[p] = {"box": _slots(h.get("box", []), BOX_SIZE), "stash": _slots(h.get("stash", []), STASH_SIZE),
+				"card_timer": float(h.get("card_timer", 0.0))}
+			if h.has("name"):
+				hands[p]["name"] = String(h["name"])
+	else:
+		# saves from before multiplayer: one box + stash, the owner's
+		hands[owner_pid] = {"box": _slots(d.get("box", d.get("hand", [])), BOX_SIZE),
+			"stash": _slots(d.get("stash", []), STASH_SIZE), "card_timer": float(d.get("card_timer", 0.0))}
+	present = {my_pid: true}
 	perks = d.get("perks", {})
 	friends = d.get("friends", {})
 	totems = int(d.get("totems", 0))

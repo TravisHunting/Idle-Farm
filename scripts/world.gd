@@ -113,6 +113,7 @@ var BIN := Vector2i(3, 1)
 var BIN_FRONT := Vector2i(3, 2)
 var farmer: Farmer
 var animals: Array = []
+var next_uid := 1                      # actor ids (farmer + animals), stable across saves (multiplayer sync)
 var particles: Array = []              # {p, v, life, c}
 var floats: Array = []                 # {text, p, t, c}
 var entity_layer: Node2D
@@ -951,6 +952,25 @@ func overgrow(n: int, types: Array = ["weed", "tallgrass", "bush", "bramble"]) -
 func _process(delta: float) -> void:
 	var d := delta * Game.time_scale
 	_anim_t += d
+	_update_fx(d)
+	if Game.puppet:
+		if farmer:
+			farmer.net_tick(d)
+		for a in animals:
+			a.net_tick(d)
+	elif Game.running:
+		# not while a farm is being closed: leaving a visit from a click (input comes before
+		# _process) would otherwise run one frame of simulation on the host's streamed actors
+		_simulate(d)
+	queue_redraw()
+	if entity_layer:
+		entity_layer.queue_redraw()
+	if fx_layer:
+		fx_layer.queue_redraw()
+
+
+## Everything that changes the farm (off on a guest's machine, see Game.puppet).
+func _simulate(d: float) -> void:
 	_update_ground(d)
 	if farmer:
 		farmer.update(d)
@@ -962,7 +982,6 @@ func _process(delta: float) -> void:
 				colony.on_gone(a)
 			elif a is Insect and swarm:
 				swarm.on_gone(a)
-	_update_fx(d)
 	_weed_t += d
 	if _weed_t > 25.0:
 		_weed_t = 0.0
@@ -977,11 +996,6 @@ func _process(delta: float) -> void:
 			for i in (4 if surge else 1):
 				if cells.size() > 0:
 					place_obj(cells.pick_random(), ["weed", "tallgrass", "bush", "bramble"].pick_random() if surge else ("weed" if randf() < 0.7 else "tallgrass"))
-	queue_redraw()
-	if entity_layer:
-		entity_layer.queue_redraw()
-	if fx_layer:
-		fx_layer.queue_redraw()
 
 
 func growth_mult(c: Vector2i) -> float:
@@ -1061,6 +1075,12 @@ func threats() -> Array:
 	return out
 
 
+## A fresh actor id (Animal/Farmer _init take one).
+func new_uid() -> int:
+	next_uid += 1
+	return next_uid - 1
+
+
 func add_animal(a: Animal) -> Animal:
 	animals.append(a)
 	return a
@@ -1076,6 +1096,7 @@ func count_animals(kind: String) -> int:
 
 # ---------------------------------------------------------------- fx
 func puff(p: Vector2, c: Color, n: int = 6, speed: float = 18.0, up: float = 10.0) -> void:
+	Net.fx("puff", [p, c, n, speed, up])
 	for i in n:
 		var a := randf() * TAU
 		particles.append({"p": p, "v": Vector2(cos(a), sin(a)) * randf_range(0.3, 1.0) * speed + Vector2(0, -up),
@@ -1083,6 +1104,7 @@ func puff(p: Vector2, c: Color, n: int = 6, speed: float = 18.0, up: float = 10.
 
 
 func float_text(text: String, p: Vector2, c: Color = Color("ffcd75")) -> void:
+	Net.fx("float", [text, p, c])
 	floats.append({"text": text, "p": p, "t": 0.0, "c": c})
 
 
@@ -1230,7 +1252,8 @@ func _draw_water(c: Vector2i, p: Vector2) -> void:
 
 
 # ---------------------------------------------------------------- save
-func to_dict() -> Dictionary:
+## The whole farm; without the actors (farmer + animals) for Net's state snapshots.
+func to_dict(with_actors: bool = true) -> Dictionary:
 	var cr := {}
 	for c in crops:
 		cr["%d,%d" % [c.x, c.y]] = crops[c]
@@ -1239,7 +1262,7 @@ func to_dict() -> Dictionary:
 		ob["%d,%d" % [c.x, c.y]] = objs[c]
 	var an: Array = []
 	for a in animals:
-		if a.persistent():
+		if with_actors and a.persistent():
 			an.append(a.to_dict())
 	var fl: Array = []
 	for f in fields:
@@ -1257,11 +1280,17 @@ func to_dict() -> Dictionary:
 	for c in bare:
 		br["%d,%d" % [c.x, c.y]] = bare[c]
 	return {"alien_land": land, "insect_land": tun, "bare": br, "rows": ROWS, "ground": Array(ground), "wet": Array(wet), "crops": cr, "objs": ob, "animals": an,
-		"farmer": farmer.to_dict() if farmer else {}, "fields": fl, "biome": biome,
-		"house": "%d,%d" % [house.x, house.y], "bin": "%d,%d" % [BIN.x, BIN.y]}
+		"farmer": farmer.to_dict() if farmer and with_actors else {}, "fields": fl, "biome": biome,
+		"house": "%d,%d" % [house.x, house.y], "bin": "%d,%d" % [BIN.x, BIN.y], "next_uid": next_uid}
 
 
 func from_dict(d: Dictionary) -> void:
+	load_grid(d)
+	load_actors(d)
+
+
+## Everything but the actors (a guest reloads this from every state snapshot).
+func load_grid(d: Dictionary) -> void:
 	var rows_saved := int(d.get("rows", 16))   # v0.2 farms were 16 rows tall
 	ground.fill(G_GRASS)
 	wet.fill(0.0)
@@ -1314,10 +1343,16 @@ func from_dict(d: Dictionary) -> void:
 	var br: Dictionary = d.get("bare", {})
 	for k in br:
 		bare[_key_cell(String(k))] = float(br[k])
+
+
+## The farmer and the animals (rebuilt from scratch).
+func load_actors(d: Dictionary) -> void:
 	animals.clear()
+	next_uid = int(d.get("next_uid", 1))
 	farmer = Farmer.new(self)
 	farmer.pos = feet(DOOR)
 	farmer.from_dict(d.get("farmer", {}))
+	var top := farmer.uid
 	for ad in d.get("animals", []):
 		var kind := String(ad.get("kind", "chicken"))
 		var ap := Vector2(float(ad.get("x", 80)), float(ad.get("y", 80)))
@@ -1330,6 +1365,8 @@ func from_dict(d: Dictionary) -> void:
 			a = Animal.new(self, kind, ap)
 		a.from_dict(ad)
 		animals.append(a)
+		top = maxi(top, a.uid)
+	next_uid = maxi(next_uid, top + 1)
 
 
 ## Old saves were shorter: the new rows at the bottom start out wild.
