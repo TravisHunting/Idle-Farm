@@ -158,6 +158,11 @@ Key systems added in v0.3:
   `build/IdleFarm.exe`, release (debug keys off).
 - Needs the Godot 4.7.2 export templates (Editor -> Manage Export Templates -> Download and Install).
 - CLI: `Godot_v4.7.2-stable_win64_console.exe --headless --path . --export-release "Windows Desktop" build/IdleFarm.exe`
+- Run `.\build-game.ps1` to create `build/`, import resources and export; optional `-GodotPath`
+  selects the console executable. Direct CLI exports need `build/` created beforehand.
+- Tests, documentation, editor addons and build output are excluded from the package.
+- [x] Windows x64 release exported as one executable; standalone headless and windowed launch verified.
+- [x] Root PowerShell build script with resource import, configurable Godot path and export error checks.
 
 ## Checklist
 
@@ -331,6 +336,15 @@ Key systems added in v0.3:
   (a real router port mapping) without the user's OK.
 
 ## Changelog
+- 2026-10-24 - Added `build-game.ps1` at the project root to import resources and export the Windows
+  release from any working directory, with an optional `-GodotPath` and failure checks. README
+  build instructions now use the script. Verified a complete build under Windows PowerShell 5.1
+  from the parent directory.
+- 2026-10-24 - Built `build/IdleFarm.exe` (Windows x64 release, embedded PCK). Installed the official
+  4.7.2 Windows templates after verifying SHA512, removed references to the absent Godot AI addon,
+  excluded development files from exports, and documented the PowerShell build commands. Verified
+  the exported executable launches independently and renders the welcome screen; source smoke check
+  passed farm startup, five simulated minutes, and save/reload using isolated test saves.
 - 2026-10-24 - v0.7 phase 5: `tests/run_click_test.sh` plays the multiplayer flow through the real UI (synthetic
   clicks / drags / keys on two copies). Fixed one frame of simulation on a guest's streamed actors when leaving
   a visit (farmer error). SHARED / SPLIT OFF tag moved off the house picture. `"port"` setting for hosting.

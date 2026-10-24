@@ -19,7 +19,6 @@ config/icon="res://icon.svg"
 
 [autoload]
 
-_mcp_game_helper="*res://addons/godot_ai/runtime/game_helper.gd"
 Art="*res://scripts/art.gd"
 Game="*res://scripts/game.gd"
 Net="*res://scripts/net.gd"
@@ -37,10 +36,6 @@ window/size/window_height_override=864
 window/stretch/mode="viewport"
 window/stretch/scale_mode="integer"
 window/per_pixel_transparency/allowed=true
-
-[editor_plugins]
-
-enabled=PackedStringArray("res://addons/godot_ai/plugin.cfg")
 
 [physics]
 

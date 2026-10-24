@@ -87,11 +87,19 @@ generated in GDScript, so there are no asset files to download.
 - **From the editor:** open the project in Godot 4.7+ and press Play. The editor shows the game in
   its Game tab; the borderless, docked window only appears when you run it standalone or export
   it.
-- **Windows build:** install the Godot 4.7.2 export templates, then run:
+- **Windows build:** install the Godot 4.7.2 export templates via **Editor > Manage Export
+  Templates > Download and Install**, then run this in PowerShell from the project folder:
 
-  ```bash
-  Godot_v4.7.2-stable_win64_console.exe --headless --path . --export-release "Windows Desktop" build/IdleFarm.exe
+  ```powershell
+  .\build-game.ps1
   ```
+
+  The script imports resources and exports the game. It looks for the Godot 4.7.2 console executable
+  beside the project folder; use `-GodotPath 'D:\Tools\Godot_v4.7.2-stable_win64_console.exe'`
+  to select another location. It also works when called from another working directory.
+
+  Double-click `build/IdleFarm.exe` to play. This is a Windows x64 release build with the game
+  data embedded: share just the `.exe`; players do not need Godot installed. Debug keys are disabled.
 
 Saves live in `%APPDATA%/Godot/app_userdata/IdleFarm/` on Windows.
 
