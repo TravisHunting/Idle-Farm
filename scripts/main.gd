@@ -305,7 +305,8 @@ func save_game() -> void:
 	if world == null or world.farmer == null or not Game.running and _game_root == null:
 		return
 	var meta := {"day": Game.day, "level": Game.level(), "wealth": Game.wealth(), "weird": int(Game.weird),
-		"relics": Game.relics.size(), "play_seconds": Game.play_seconds, "farm": Game.farm_name}
+		"relics": Game.relics.size(), "play_seconds": Game.play_seconds, "farm": Game.farm_name,
+		"shared": Game.owner_pid != Game.my_pid, "forked": Game.forked_from != ""}
 	var d := {"version": 4, "time": Time.get_unix_time_from_system(), "meta": meta,
 		"game": Game.to_dict(), "world": world.to_dict()}
 	var fa := FileAccess.open(Game.slot_path(Game.slot), FileAccess.WRITE)
@@ -380,6 +381,8 @@ func _offline_progress(seconds: float) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not OS.is_debug_build() or not (event is InputEventKey) or not event.pressed or world == null:
 		return
+	if Game.puppet and event.keycode != KEY_F5:
+		return   # a guest's debug keys would only be refused by the host
 	const DEBUG_KEYS := {KEY_F1: "draw", KEY_F2: "fill", KEY_F3: "event", KEY_F6: "weird", KEY_F7: "alien",
 		KEY_F8: "tides", KEY_F9: "brood", KEY_F10: "locusts", KEY_F11: "cataclysm"}
 	if DEBUG_KEYS.has(event.keycode):

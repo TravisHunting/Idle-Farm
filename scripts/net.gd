@@ -113,6 +113,9 @@ func host(port: int = PORT) -> Error:
 	multiplayer.multiplayer_peer = _peer
 	mode = "hosting"
 	host_port = port
+	var my_name := String(Game.settings.get("name", "")).strip_edges().to_upper()
+	if my_name != "":
+		Game.hand()["name"] = my_name
 	if use_upnp:
 		_start_upnp(port)
 	else:
@@ -333,6 +336,14 @@ func _cmd(cmd: Dictionary) -> void:
 		return
 	if main.commands.execute(guest_pid, cmd):
 		_state_now = true
+	else:
+		var why := "That card can't be played right now." if String(cmd.get("type", "")) == "choose" else "Only the host can change that."
+		_refused.rpc_id(id, why)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _refused(why: String) -> void:
+	_set_status(why)
 
 
 ## Called by the game for one-shot visuals ("puff", "float", "strike", "beam", "meteor", "shake").

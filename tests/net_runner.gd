@@ -209,7 +209,11 @@ func _b() -> void:
 	if shot != "":
 		await wait(3.0)
 		get_viewport().get_texture().get_image().save_png(shot)
-		print("[guest] screenshot: ", shot)
+		main.hud.settings_open = true
+		await wait(0.3)
+		get_viewport().get_texture().get_image().save_png(shot.get_basename() + "_settings.png")
+		main.hud.settings_open = false
+		print("[guest] screenshots: ", shot, " + _settings")
 	print("[guest] join + play took %.1fs" % (Time.get_ticks_msec() / 1000.0 - t_join))
 	# steady-state bandwidth (the welcome packet with the whole farm is excluded)
 	var b0 := int(Net.stats["received"])

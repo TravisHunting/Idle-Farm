@@ -108,6 +108,7 @@ changed drastically and lose territory). Four factions compete for the 12x22 far
 | `scripts/deck.gd` (class **Deck**) | **The card content** (70 cards, pure data). Its header documents every requirement and effect keyword. Add new cards here. |
 | `scripts/commands.gd` (class **Commands**) | Every player action as a command (`submit` / `execute(pid, cmd)`): play a card, move a card, card cadence, speed, debug keys. Validates everything (multiplayer, see `MULTIPLAYER.md`). |
 | `scripts/net.gd` (autoload **Net**) | Two-player networking over ENet: host/join, handshake, guest commands -> host, state snapshots + actor deltas + one-shot effects -> guest (puppet mode). See `MULTIPLAYER.md`. |
+| `scripts/text_entry.gd` (class **TextEntry**) | One-line text field for the pixel-font UI (join address, player name). |
 | `scripts/cards.gd` | **Card engine**: weighted drawing (rarity, level, weirdness, `needs`), requirement checks with progress text, auto-costs, effect interpreter (`apply`), gamble/delay, relic gain/loss + passives (daily/dawn/night hooks), companion actors. |
 | `scripts/welcome.gd` | Welcome screen: how-to-play page, then 3 save slots with summaries + delete. |
 | `scripts/main.gd` | Welcome -> slot -> builds the game tree in code (under GameRoot; torn down on menu), window docking (centred right with padding), per-slot save/load + offline progress, debug keys. |
@@ -285,7 +286,8 @@ Key systems added in v0.3:
   - [x] Phase 1: ENet net core (`net.gd`): handshake, commands, snapshots, actor stream, effects
   - [x] Phase 2: when the host leaves the guest keeps a fork; rejoining restores hands; goodbye messages
   - [x] Phase 3: UPnP port forwarding (thread), addresses to share, help text, join errors (real router untested)
-  - [ ] Phase 4-5: UI, two-machine tests
+  - [x] Phase 4: UI: JOIN A FRIEND page, PLAY TOGETHER in the gear menu, 2P indicator, toasts, guest limits
+  - [ ] Phase 5: click-through with two windows, a real internet test, docs
 
 ## Next up / ideas (not started)
 - [ ] Balance pass on the deck (reward sizes vs. level scaling; how fast weirdness climbs)
@@ -318,6 +320,9 @@ Key systems added in v0.3:
   variable an explicit type instead of `:=`.
 
 ## Changelog
+- 2026-10-24 - v0.7 phase 4: multiplayer UI. Welcome > JOIN A FRIEND (name, address, slot for the copy with an
+  overwrite confirm), gear menu PLAY TOGETHER (name, host / copy address / stop, or leave a visit), "2P" in the
+  top bar, status toasts, guest-only limits, SHARED / SPLIT OFF slot tags. `tests/ui_shots.gd` for screenshots.
 - 2026-10-24 - v0.7 phase 3: hosting asks the router to forward the port (UPnP in a thread, unmapped on
   stop), `Net.share_address/lan_addresses/help_lines/parse_address`, an 8s join timeout and clearer error
   texts. Tests never touch the real router unless `upnp=1`.

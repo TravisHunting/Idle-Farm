@@ -6,12 +6,14 @@
 > whole phase is done. Keep `tests/sim_test.gd` green after every task: single player must never break.
 
 ## Status
-- **Current phase:** 4 (UI). Phases 0-3 are done (2026-10-24). Real-router UPnP was tried once with the
+- **Current phase:** 5 (verification & docs). Phases 0-4 are done (2026-10-24). Real-router UPnP was tried once with the
   user's OK (`-s tests/net_test.gd -- role=solo upnp=1`): no UPnP device answered on their network (gateway
   192.168.1.254, Wi-Fi on the Windows "Public" profile), so the fallback path ran and nothing was mapped. A
   successful real mapping is still unverified (5.3). Only run `upnp=1` with the user's OK.
-- **Last done:** 3.4 guest errors; `tests/run_net_test.sh` now also runs a single-copy `role=solo` check.
-- **Next task:** 4.1 text entry widget.
+- **Last done:** phase 4 UI (join page, hosting panel, 2P indicator, guest limits, slot tags).
+- **Next task:** 5.2 two windows on one PC, clicked through by a person (the UI was only screenshot-checked
+  with states set from code), then 5.3 a real internet test, then 5.4 docs. 5.1 is effectively done
+  (`tests/run_net_test.sh`).
 - **Known blockers:** none.
 - **Multiplayer test:** `bash tests/run_net_test.sh` (~50s) starts three headless copies on localhost
   (A = `role=host`, B = `role=guest profile=2`, ports P and P+1; plus `role=solo profile=3` on P+5) and all
@@ -150,15 +152,15 @@ Autoload `Net` (`scripts/net.gd`), the same node path on both sides, so RPCs jus
   connection.
 
 ### Phase 4: UI (pixel font, built in code like the rest)
-- [ ] **4.1 Text entry widget** for `IP:port` (digits, `.`, `:`, backspace, Ctrl+V paste), reusable.
-- [ ] **4.2 Welcome screen "JOIN FRIEND"**: address -> pick slot for the copy (confirm overwrite)
+- [x] **4.1 Text entry widget** for `IP:port` (digits, `.`, `:`, backspace, Ctrl+V paste), reusable.
+- [x] **4.2 Welcome screen "JOIN FRIEND"**: address -> pick slot for the copy (confirm overwrite)
   -> "connecting..." -> in game. Back button cancels.
-- [ ] **4.3 Hosting from the game**: settings panel "INVITE FRIEND" -> starts server + UPnP, shows
+- [x] **4.3 Hosting from the game**: settings panel "INVITE FRIEND" -> starts server + UPnP, shows
   the address + copy button + status; "STOP" closes it.
-- [ ] **4.4 HUD indicator** in the top bar: hosting / friend here / connecting / lost; log lines
+- [x] **4.4 HUD indicator** in the top bar: hosting / friend here / connecting / lost; log lines
   on join/leave.
-- [ ] **4.5 Guest restrictions**: card cadence + speed greyed out, debug keys only on the host.
-- [ ] **4.6 Slot summary** on the welcome screen shows "shared" / "fork" when relevant (optional).
+- [x] **4.5 Guest restrictions**: card cadence + speed greyed out, debug keys only on the host.
+- [x] **4.6 Slot summary** on the welcome screen shows "shared" / "fork" when relevant (optional).
 
 ### Phase 5: verification & docs
 - [ ] **5.1 `tests/net_test.gd` + `net_runner.gd`**: start two headless copies on localhost
@@ -256,6 +258,27 @@ Autoload `Net` (`scripts/net.gd`), the same node path on both sides, so RPCs jus
   failed, `Couldn't join: <host's reason>`, host gone with "went home" vs "lost the connection" (`last_exit`).
 - Status texts are full sentences in `Net.status` / `status_changed`; the UI only has to show them.
 
+### Phase 4 notes (what exists now)
+- `scripts/text_entry.gd` (`TextEntry`): one-line field for the pixel font: `key(event)` -> "" / "edit" / "submit"
+  (typing, Backspace, Ctrl+Backspace clears, Ctrl+V pastes, Enter), `draw(ci, rect, focused, t, placeholder)`,
+  charsets `ADDRESS` / `NAME`, upper-case like the font.
+- Welcome: page 1 has "JOIN A FRIEND >"; page 2 = YOUR NAME, THEIR ADDRESS (IP:PORT), "KEEP A COPY OF THEIR FARM IN"
+  FARM 1-3 (an occupied slot shows a red warning and JOIN asks "SURE? REPLACE"), Net.status / address errors,
+  JOIN / CANCEL, BACK (also cancels). Tab/Enter/Esc move between fields. Name and last address are kept in
+  settings (`name`, `last_join`). Slot boxes show SHARED (a guest copy) or SPLIT OFF (a fork) in green.
+- Settings panel (gear) has a PLAY TOGETHER part: YOUR NAME field (also sets the host's hand name), then
+  HOST THIS FARM / (hosting) who's here + `Net.help_lines()` + COPY ADDRESS + STOP HOSTING / (guest)
+  "VISITING X'S FARM" + LEAVE (KEEP A COPY) (= back to menu). DONE moved down to y+244.
+- HUD: "2P" in the top bar (green: two players; blinking dim: hosting, waiting); every `Net.status_changed` shows
+  as a toast over the farm for 5s (hidden while the settings panel is open).
+- Guest limits: card cadence shows "HOST'S" and is disabled, NEXT CARD disabled, debug keys ignored (F5 still
+  works). The host answers a refused guest command with `_refused` -> a toast ("That card can't be played right
+  now." / "Only the host can change that.").
+- `tests/ui_shots.gd -- out=<folder>` (windowed) saves ui_join / ui_settings / ui_hosting / ui_toast PNGs (router
+  faked); the net test's `shot=` now also saves `<name>_settings.png` from the guest.
+- Not seen yet: real mouse/keyboard use of the new UI (states were set from code for the screenshots), the
+  SHARED / SPLIT OFF tags, the 2P indicator after its last move.
+
 ## Risks / gotchas to keep in mind
 - `World.from_dict` rebuilds actors: never call it per snapshot on the guest (task 1.4 split).
 - Anything that mutates state from a timer/tween/await bypasses the puppet gate: audit in 0.6.
@@ -285,3 +308,6 @@ Autoload `Net` (`scripts/net.gd`), the same node path on both sides, so RPCs jus
 - 2026-10-24: 2h UPnP lease with a permanent fallback; clearer "no router answered" text. Real-router run (user
   OK'd): no UPnP device answered on the user's network (5s discovery, any device type), nothing was mapped,
   the fallback text showed. Likely UPnP off on the ISP router at .254, or the Public network profile.
+- 2026-10-24: phase 4 done (4.1-4.6). `scripts/text_entry.gd`, welcome join page, settings PLAY TOGETHER part,
+  2P indicator, toasts, guest limits, `_refused`, slot tags, `tests/ui_shots.gd`. Screenshots checked (join
+  page, settings, hosting, toast, guest view + guest settings); net test (3 copies) and sim_test pass.
