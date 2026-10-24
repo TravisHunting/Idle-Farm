@@ -93,7 +93,13 @@ changed drastically and lose territory). Four factions compete for the 12x22 far
   non-zero on failure (~25s per 8 days). After adding a new `class_name` script, run
   `--headless --path . --import` once to refresh the global class cache.
 - **Multiplayer test:** `bash tests/run_net_test.sh` runs two headless copies on localhost (~50s): join,
-  play, host leaves, guest keeps a fork, roles swap, rejoin.
+  play, host leaves, guest keeps a fork, roles swap, rejoin. `bash tests/run_click_test.sh` (~25s) does the
+  same flow through the real UI with synthetic clicks and keys (profiles 4 and 5). Windowed screenshots:
+  `-s tests/ui_shots.gd -- out=<folder>`, or the click test without `--headless` plus `out=<folder>`.
+- **Two players on one PC:** run a second standalone copy with `-- profile=2` (own settings and save
+  slots: `user://settings2.json`, `slot2_N.json`). Host in one (gear > HOST THIS FARM), join
+  `127.0.0.1:24680` in the other. Port: 24680 UDP (`"port"` in the settings file changes it); Windows asks
+  to allow the firewall the first time. Details: `MULTIPLAYER.md`.
 - MCP testing tip: `game_manage input_mouse` positions are in *window* pixels (2x the 192x432
   canvas in the editor's embedded view).
 - Export: see "Exporting" below.
@@ -287,7 +293,8 @@ Key systems added in v0.3:
   - [x] Phase 2: when the host leaves the guest keeps a fork; rejoining restores hands; goodbye messages
   - [x] Phase 3: UPnP port forwarding (thread), addresses to share, help text, join errors (real router untested)
   - [x] Phase 4: UI: JOIN A FRIEND page, PLAY TOGETHER in the gear menu, 2P indicator, toasts, guest limits
-  - [ ] Phase 5: click-through with two windows, a real internet test, docs
+  - [x] Phase 5: two-copy tests (`run_net_test.sh`, `run_click_test.sh` click-through), docs
+  - [ ] Phase 5.3: a real internet test between two networks (needs a person on each end)
 
 ## Next up / ideas (not started)
 - [ ] Balance pass on the deck (reward sizes vs. level scaling; how fast weirdness climbs)
@@ -318,8 +325,15 @@ Key systems added in v0.3:
   missing ones draw magenta.
 - Calls on nodes typed as plain `Node` (e.g. `director.spawn_animal`) return Variant: give the
   variable an explicit type instead of `:=`.
+- Multiplayer: on a guest `Game.puppet` is true and nothing may change the world; gate new `_process`
+  logic with `Game.simulating()` and send player actions through `commands.submit()`. A new actor
+  field the guest must see goes in that actor's `net_fields()`. Never run the net test with `upnp=1`
+  (a real router port mapping) without the user's OK.
 
 ## Changelog
+- 2026-10-24 - v0.7 phase 5: `tests/run_click_test.sh` plays the multiplayer flow through the real UI (synthetic
+  clicks / drags / keys on two copies). Fixed one frame of simulation on a guest's streamed actors when leaving
+  a visit (farmer error). SHARED / SPLIT OFF tag moved off the house picture. `"port"` setting for hosting.
 - 2026-10-24 - v0.7 phase 4: multiplayer UI. Welcome > JOIN A FRIEND (name, address, slot for the copy with an
   overwrite confirm), gear menu PLAY TOGETHER (name, host / copy address / stop, or leave a visit), "2P" in the
   top bar, status toasts, guest-only limits, SHARED / SPLIT OFF slot tags. `tests/ui_shots.gd` for screenshots.

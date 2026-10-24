@@ -321,7 +321,7 @@ func _draw_slots() -> void:
 			_txt(line2, box.position + Vector2(5, 25), C_PURPLE if w >= 10 else C_DIM)
 			if m.get("shared", false) or m.get("forked", false):
 				var tag := "SHARED" if m.get("shared", false) else "SPLIT OFF"
-				_txt(tag, Vector2(box.end.x - 6 - Art.text_width(tag), box.position.y + 34), C_GREEN)
+				_txt(tag, Vector2(box.end.x - 36 - Art.text_width(tag), box.position.y + 43), C_GREEN)   # left of DEL
 			_txt("SAVED " + _ago(float(m.get("time", 0.0))), box.position + Vector2(5, 34), C_DIM)
 			_txt("PLAYED " + _dur(float(m.get("play_seconds", 0.0))), box.position + Vector2(5, 43), C_DIM)
 			draw_texture(Art.tex("house"), box.position + Vector2(140, 4))

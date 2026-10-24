@@ -6,14 +6,14 @@
 > whole phase is done. Keep `tests/sim_test.gd` green after every task: single player must never break.
 
 ## Status
-- **Current phase:** 5 (verification & docs). Phases 0-4 are done (2026-10-24). Real-router UPnP was tried once with the
+- **Current phase:** 5 (verification & docs). Phases 0-4, 5.1, 5.2 (scripted) and 5.4 are done (2026-10-24). Real-router UPnP was tried once with the
   user's OK (`-s tests/net_test.gd -- role=solo upnp=1`): no UPnP device answered on their network (gateway
   192.168.1.254, Wi-Fi on the Windows "Public" profile), so the fallback path ran and nothing was mapped. A
   successful real mapping is still unverified (5.3). Only run `upnp=1` with the user's OK.
-- **Last done:** phase 4 UI (join page, hosting panel, 2P indicator, guest limits, slot tags).
-- **Next task:** 5.2 two windows on one PC, clicked through by a person (the UI was only screenshot-checked
-  with states set from code), then 5.3 a real internet test, then 5.4 docs. 5.1 is effectively done
-  (`tests/run_net_test.sh`).
+- **Last done:** 5.2 as a scripted click-through (`tests/run_click_test.sh`: two copies driven only by
+  synthetic clicks, drags and keys); it found and fixed one bug (see Log). 5.4 docs.
+- **Next task:** 5.3 a real internet test (needs the user and a second network, see 5.3), plus a person
+  playing in two windows for feel (smoothness, card play) - the scripted run checks behaviour, not feel.
 - **Known blockers:** none.
 - **Multiplayer test:** `bash tests/run_net_test.sh` (~50s) starts three headless copies on localhost
   (A = `role=host`, B = `role=guest profile=2`, ports P and P+1; plus `role=solo profile=3` on P+5) and all
@@ -163,15 +163,16 @@ Autoload `Net` (`scripts/net.gd`), the same node path on both sides, so RPCs jus
 - [x] **4.6 Slot summary** on the welcome screen shows "shared" / "fork" when relevant (optional).
 
 ### Phase 5: verification & docs
-- [ ] **5.1 `tests/net_test.gd` + `net_runner.gd`**: start two headless copies on localhost
+- [x] **5.1 `tests/net_test.gd` + `net_runner.gd`**: start two headless copies on localhost
   (`profile=1 role=host`, `profile=2 role=guest`); the guest joins, plays a card via a command, and
   the host state shows it; the guest receives state + actors; kill the host -> the guest goes solo
   and its slot file exists; the old host joins the guest's fork and gets its hand back. Exit
   non-zero on failure.
-- [ ] **5.2 Two windows on one PC** (standalone runs with profiles): visual check of smoothness,
-  card play feel, leave/fork.
+- [x] **5.2 Two windows on one PC** (standalone runs with profiles): visual check of smoothness,
+  card play feel, leave/fork. Done as `tests/click_test.gd` (headless, or windowed with `out=` for
+  screenshots); a person playing for feel is still welcome.
 - [ ] **5.3 Internet test with UPnP** between two real networks (needs the user).
-- [ ] **5.4 Docs**: TODO.md architecture rows (`net.gd`, `commands.gd`), How to run (two
+- [x] **5.4 Docs**: TODO.md architecture rows (`net.gd`, `commands.gd`), How to run (two
   instances, profiles, port), Gotchas, Changelog; one line in CLAUDE.md / AGENTS.md.
 
 ### Phase 0 notes (what exists now)
@@ -276,8 +277,19 @@ Autoload `Net` (`scripts/net.gd`), the same node path on both sides, so RPCs jus
   now." / "Only the host can change that.").
 - `tests/ui_shots.gd -- out=<folder>` (windowed) saves ui_join / ui_settings / ui_hosting / ui_toast PNGs (router
   faked); the net test's `shot=` now also saves `<name>_settings.png` from the guest.
-- Not seen yet: real mouse/keyboard use of the new UI (states were set from code for the screenshots), the
-  SHARED / SPLIT OFF tags, the 2P indicator after its last move.
+- Since seen (5.2): real mouse/keyboard use of the UI, the SHARED tag (moved left of DEL: it overlapped the
+  house), the 2P indicator. SPLIT OFF uses the same spot.
+
+### Phase 5 notes (what exists now)
+- `tests/click_test.gd` + `click_runner.gd`, `bash tests/run_click_test.sh [port]` (~25s): host (profile 4)
+  and guest (profile 5), settings and slots 1-3 of those profiles wiped before and after. Input goes in with
+  `get_viewport().push_input(event, true)` in 192x432 screen pixels, at the centres of the screens' own
+  layout rects (`welcome._rects()`, `hud._settings_rects()`, `hud._slot_rect()`, `hud._modal_rects()`,
+  `hud.btns`). The only step done in code: the host deals the guest 3 cards.
+- `settings["port"]` (settings file) sets the port HOST THIS FARM uses; default 24680.
+- How to play two windows by hand on one PC (two standalone copies, separate settings and saves):
+  `Godot --path . -- profile=2` next to a normal run; host in one (gear > HOST THIS FARM), join
+  `127.0.0.1:24680` in the other.
 
 ## Risks / gotchas to keep in mind
 - `World.from_dict` rebuilds actors: never call it per snapshot on the guest (task 1.4 split).
@@ -311,3 +323,8 @@ Autoload `Net` (`scripts/net.gd`), the same node path on both sides, so RPCs jus
 - 2026-10-24: phase 4 done (4.1-4.6). `scripts/text_entry.gd`, welcome join page, settings PLAY TOGETHER part,
   2P indicator, toasts, guest limits, `_refused`, slot tags, `tests/ui_shots.gd`. Screenshots checked (join
   page, settings, hosting, toast, guest view + guest settings); net test (3 copies) and sim_test pass.
+- 2026-10-24: 5.1 ticked (net test). 5.2 as `tests/click_test.gd`: the whole join / play / leave / stop
+  flow by synthetic input passes on both sides. Found: leaving a visit from a click ran one frame of
+  simulation on the streamed actors (input comes before `_process`; puppet was already off) -> a farmer
+  `task["cell"]` error in windowed runs. `World._process` now simulates only while `Game.running`. SHARED
+  tag moved. `settings["port"]` added. 5.4 docs. Left: 5.3.

@@ -309,7 +309,7 @@ func _settings_click(p: Vector2) -> void:
 	if name_focus:
 		return
 	if r.has("host") and r["host"].has_point(p):
-		Net.host()
+		Net.host(int(Game.settings.get("port", Net.PORT)))   # "port" in the settings file, if 24680 is taken
 		return
 	if r.has("stop_host") and r["stop_host"].has_point(p):
 		Net.stop()

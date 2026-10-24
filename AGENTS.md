@@ -43,7 +43,8 @@ moment to connect. If the editor isn't open, ask the user to open the project in
 - `TODO.md` — design doc, architecture map, progress checklist and changelog. **Read it first**,
   and update its checkboxes and Changelog when you finish something.
 - `MULTIPLAYER.md` — the two-player plan: status, decisions, ordered task checklist. Work the
-  first unchecked task and update its Status/Log sections as you go.
+  first unchecked task and update its Status/Log sections as you go. After network or multiplayer UI
+  changes run `bash tests/run_net_test.sh` and `bash tests/run_click_test.sh` (headless, localhost).
 - `CLAUDE.md` — short agent notes (debug keys, verification workflow).
 - Card content: `scripts/deck.gd` (documented mini-language). Card logic: `scripts/cards.gd`.
 - Farm generation, fields and paths: `scripts/world.gd`. Farmer AI: `scripts/farmer.gd`.

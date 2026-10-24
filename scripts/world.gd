@@ -953,13 +953,15 @@ func _process(delta: float) -> void:
 	var d := delta * Game.time_scale
 	_anim_t += d
 	_update_fx(d)
-	if not Game.puppet:
-		_simulate(d)
-	else:
+	if Game.puppet:
 		if farmer:
 			farmer.net_tick(d)
 		for a in animals:
 			a.net_tick(d)
+	elif Game.running:
+		# not while a farm is being closed: leaving a visit from a click (input comes before
+		# _process) would otherwise run one frame of simulation on the host's streamed actors
+		_simulate(d)
 	queue_redraw()
 	if entity_layer:
 		entity_layer.queue_redraw()
