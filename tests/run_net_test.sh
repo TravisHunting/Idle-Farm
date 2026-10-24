@@ -8,8 +8,12 @@ OUT="${TMPDIR:-${TEMP:-/tmp}}"
 HOST=$!
 "$G" --headless --path . -s tests/net_test.gd -- role=guest port=$PORT profile=2 > "$OUT/net_guest.log" 2>&1 &
 GUEST=$!
+"$G" --headless --path . -s tests/net_test.gd -- role=solo port=$((PORT + 5)) profile=3 > "$OUT/net_solo.log" 2>&1 &
+SOLO=$!
 wait $GUEST; G_EXIT=$?
 wait $HOST; H_EXIT=$?
+wait $SOLO; S_EXIT=$?
 echo "---- host (exit $H_EXIT)"; grep -E "ok \[|FAIL|SCRIPT ERROR|ERROR|ALL CHECKS|stats|\[net\]" "$OUT/net_host.log"
 echo "---- guest (exit $G_EXIT)"; grep -E "ok \[|FAIL|SCRIPT ERROR|ERROR|ALL CHECKS|stats|steady|took|\[net\]" "$OUT/net_guest.log"
-[ $H_EXIT -eq 0 ] && [ $G_EXIT -eq 0 ]
+echo "---- solo (exit $S_EXIT)"; grep -E "ok \[|FAIL|SCRIPT ERROR|ERROR|ALL CHECKS|\[solo\]" "$OUT/net_solo.log"
+[ $H_EXIT -eq 0 ] && [ $G_EXIT -eq 0 ] && [ $S_EXIT -eq 0 ]

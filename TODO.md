@@ -284,7 +284,8 @@ Key systems added in v0.3:
   - [x] Phase 0: player ids + profiles, per-player hands, command layer, actor ids, world ids, puppet mode
   - [x] Phase 1: ENet net core (`net.gd`): handshake, commands, snapshots, actor stream, effects
   - [x] Phase 2: when the host leaves the guest keeps a fork; rejoining restores hands; goodbye messages
-  - [ ] Phase 3-5: UPnP, UI, two-machine tests
+  - [x] Phase 3: UPnP port forwarding (thread), addresses to share, help text, join errors (real router untested)
+  - [ ] Phase 4-5: UI, two-machine tests
 
 ## Next up / ideas (not started)
 - [ ] Balance pass on the deck (reward sizes vs. level scaling; how fast weirdness climbs)
@@ -317,6 +318,9 @@ Key systems added in v0.3:
   variable an explicit type instead of `:=`.
 
 ## Changelog
+- 2026-10-24 - v0.7 phase 3: hosting asks the router to forward the port (UPnP in a thread, unmapped on
+  stop), `Net.share_address/lan_addresses/help_lines/parse_address`, an 8s join timeout and clearer error
+  texts. Tests never touch the real router unless `upnp=1`.
 - 2026-10-24 - v0.7 phase 2: leaving works both ways. When the host goes the guest keeps the farm as its
   own fork (`main.host_left`) and can host it; a returning player gets their hand back; `Net.stop` says
   goodbye (`_bye`, `Net.last_exit`); window close says goodbye too. Net test is now a full role-swap scenario.

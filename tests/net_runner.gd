@@ -9,6 +9,7 @@ extends Node
 ##   3. A joins B's fork (A's own farm is saved first): A gets its old hand back; B sees A's hand
 ##      was kept, not recreated.
 ##   4. A goes back to the menu (bye): B notices at once; A's copy of B's farm is in A's slot.
+## role=solo (one copy): addresses, the router step (faked; upnp=1 tries the real router), join errors.
 ## Each copy checks its own side; exit code 0 = all its checks passed.
 
 const SLOT := 8          # each copy's own farm (A's original, B's copy of it)
@@ -32,6 +33,8 @@ func _ready() -> void:
 		elif a.begins_with("shot=") and DisplayServer.get_name() != "headless":
 			shot = a.substr(5)
 	Net.verbose = true
+	# never touch the real router from a test unless asked to (upnp=1 opens a real port mapping)
+	Net.use_upnp = "upnp=1" in OS.get_cmdline_user_args()
 	_run.call_deferred()
 
 
@@ -42,6 +45,8 @@ func _run() -> void:
 	await get_tree().process_frame
 	if role == "host":
 		await _a()
+	elif role == "solo":
+		await _solo()
 	else:
 		await _b()
 	Net.stop()
@@ -249,3 +254,61 @@ func _b() -> void:
 	check(left, "noticed the visitor leaving")
 	check(Net.last_exit == "bye", "the visitor said goodbye (no timeout wait)")
 	check(not Game.present.has(host_pid) and Game.hands.has(host_pid), "the visitor's hand stays for next time")
+
+
+# ---------------------------------------------------------------- solo: addresses, UPnP, join errors
+func _solo() -> void:
+	# typed addresses
+	var cases := {"1.2.3.4": ["1.2.3.4", Net.PORT], " 1.2.3.4:5000 ": ["1.2.3.4", 5000], "farm.example.com:99": ["farm.example.com", 99],
+		"[::1]:7000": ["::1", 7000], "::1": ["::1", Net.PORT], "localhost": ["localhost", Net.PORT],
+		"": [], "1.2.3.4:": [], "1.2.3.4:abc": [], "1.2.3.4:70000": [], "999.1.1.1": [], "two words": [], "a_b": [], "[::1": []}
+	for t in cases:
+		var got: Array = Net.parse_address(t)
+		check(got == cases[t], "parse_address(%s) -> %s" % [JSON.stringify(t), got])
+	# the router step, faked
+	main.start_slot(SLOT)
+	Game.running = true
+	var real := Net.use_upnp
+	Net.use_upnp = true
+	if not real:
+		Net.upnp_fake = {"ok": true, "ip": "203.0.113.7"}
+	check(Net.host(port) == OK, "hosting (UPnP %s)" % ("REAL" if real else "faked: router says yes"))
+	check(await until(func() -> bool: return Net.upnp_state != "working", 10.0), "the router step finished")
+	print("  [solo] status: ", Net.status)
+	for l in Net.help_lines():
+		print("  [solo] help: ", l)
+	if not real:
+		check(Net.upnp_state == "open" and Net.share_address() == "203.0.113.7:%d" % port, "share the internet address when the port is open")
+		Net.stop()
+		Net.upnp_fake = {"ok": false, "why": "the router said no (718)"}
+		Net.host(port)
+		await until(func() -> bool: return Net.upnp_state != "working", 10.0)
+		var lan := Net.lan_addresses()
+		check(Net.upnp_state == "failed" and Net.share_address().ends_with(":%d" % port)
+			and (lan.is_empty() or Net.share_address().begins_with(lan[0])), "fall back to the LAN address (%s)" % Net.share_address())
+		var help := "
+".join(Net.help_lines())
+		check("forward UDP port %d" % port in help and "718" in help and "firewall" in help, "the help text explains port forwarding")
+		print("  [solo] fallback status: ", Net.status)
+		Net.upnp_fake = {}
+	var mapped := real and Net.upnp_state == "open"
+	if real:
+		print("  [solo] router lease: %ds (0 = permanent), mapped: %s" % [Net.upnp_lease, mapped])
+	Net.stop()
+	check(Net.upnp_state == "" and Net.mode == "offline", "stopping clears the router state")
+	if mapped:
+		# ask the router to delete it again: it must say there's no such mapping any more
+		var u := UPNP.new()
+		var found := u.discover(Net.UPNP_WAIT_MS, 2, "InternetGatewayDevice") == UPNP.UPNP_RESULT_SUCCESS
+		var again := u.delete_port_mapping(port, "UDP") if found else -1
+		print("  [solo] router after stop: delete again -> %d" % again)
+		check(found and again != UPNP.UPNP_RESULT_SUCCESS, "the port mapping is gone from the router (%d)" % again)
+	Net.use_upnp = real
+	# joining nobody: a clear message, not a hang
+	var t := Time.get_ticks_msec()
+	check(Net.join("127.0.0.1", port + 7, SLOT_VISIT) == OK, "trying to join a port nobody listens on")
+	await until(func() -> bool: return Net.mode == "offline", 15.0)
+	var secs := (Time.get_ticks_msec() - t) / 1000.0
+	check(Net.mode == "offline" and secs < Net.JOIN_TIMEOUT + 1.5, "gave up after %.1fs" % secs)
+	check("hosting" in Net.status, "said why: %s" % Net.status)
+	check(Game.running and not Game.puppet, "still on our own farm")

@@ -11,6 +11,8 @@ extends Node
 ## When the host goes, the guest keeps the farm as its own world (main.host_left); when the guest
 ## goes, the host carries on and the guest's hand waits in the save for them to come back.
 ## Only Net's own node path is used for RPCs, so it is the same on both machines.
+## Hosting also asks the router to forward the port (UPnP, in a thread); `share_address()` is what
+## the friend types in. Without UPnP the host forwards the port by hand, or both play on one network.
 
 signal status_changed(text: String)
 signal peer_joined(pid: String)
@@ -23,6 +25,9 @@ const ACTORS_EVERY := 0.2
 const KEYFRAME_EVERY := 10.0      # resend every actor in full now and then
 const HELLO_TIMEOUT := 5.0
 const PEER_TIMEOUT_MS := 5000
+const JOIN_TIMEOUT := 8.0         # no welcome by then: give up
+const UPNP_WAIT_MS := 2000        # how long discover() listens for the router
+const UPNP_LEASE := 7200          # seconds: the router drops the mapping by itself if we crash (0 = forever)
 ## Actor timers that tick down on the guest too: only sent when they go up.
 const DECAYING := ["bubble_t", "hurt_t"]
 
@@ -35,6 +40,13 @@ var join_slot := 1                # guest: where the shared world is kept
 var last_exit := ""               # why the other side went: "bye" (on purpose) or "lost" (dropped / timed out)
 var stats := {"sent": 0, "received": 0, "states": 0, "actors": 0}
 var verbose := false
+var use_upnp := true              # ask the router to forward the port when hosting (tests turn it off)
+var host_port := 0
+var upnp_state := ""              # "" (not tried) / "working" / "open" / "failed"
+var upnp_why := ""                # why it failed, for the help text
+var external_ip := ""             # from the router, when UPnP worked
+var upnp_lease := 0               # seconds the router keeps the mapping (0 = until removed)
+var upnp_fake := {}               # tests: pretend the router answered this ({ok, ip} or {ok: false, why})
 
 var _peer: ENetMultiplayerPeer
 var _state_t := 0.0
@@ -45,6 +57,10 @@ var _state_now := false
 var _sent := {}                   # host: uid -> values last sent (actor deltas)
 var _fx: Array = []               # host: effects to replay on the guest
 var _hello_wait := {}             # host: peer id -> seconds left to say hello
+var _join_t := 0.0                # guest: seconds left to get in
+var _join_addr := ""
+var _upnp_thread: Thread
+var _upnp: UPNP                   # the router we mapped the port on (to unmap it again)
 
 
 func _ready() -> void:
@@ -54,6 +70,12 @@ func _ready() -> void:
 	multiplayer.connected_to_server.connect(_on_connected)
 	multiplayer.connection_failed.connect(_on_connection_failed)
 	multiplayer.server_disconnected.connect(_on_server_disconnected)
+
+
+func _exit_tree() -> void:
+	if _upnp_thread:
+		_unmap(_upnp_thread.wait_to_finish().get("upnp"))
+		_upnp_thread = null
 
 
 func game_version() -> String:
@@ -90,8 +112,155 @@ func host(port: int = PORT) -> Error:
 	_peer.host.compress(ENetConnection.COMPRESS_ZSTD)
 	multiplayer.multiplayer_peer = _peer
 	mode = "hosting"
-	_set_status("Hosting on port %d." % port)
+	host_port = port
+	if use_upnp:
+		_start_upnp(port)
+	else:
+		upnp_state = ""
+		_set_status("Hosting. Your friend joins at %s." % share_address())
 	return OK
+
+
+# ---------------------------------------------------------------- the router (UPnP) + addresses
+func _start_upnp(port: int) -> void:
+	if _upnp_thread:
+		_unmap(_upnp_thread.wait_to_finish().get("upnp"))   # an earlier attempt still running
+		_upnp_thread = null
+	upnp_state = "working"
+	upnp_why = ""
+	external_ip = ""
+	_set_status("Hosting. Asking your router to open port %d..." % port)
+	_upnp_thread = Thread.new()
+	_upnp_thread.start(_upnp_job.bind(port, upnp_fake.duplicate()))
+
+
+## Runs in a thread: find the router, forward the UDP port, ask for the internet address.
+func _upnp_job(port: int, fake: Dictionary) -> Dictionary:
+	if not fake.is_empty():
+		return fake
+	var u := UPNP.new()
+	var err := u.discover(UPNP_WAIT_MS, 2, "InternetGatewayDevice")
+	if err != UPNP.UPNP_RESULT_SUCCESS:
+		return {"ok": false, "why": "no router answered (UPnP may be off on the router, or Windows calls this a Public network)" if err == UPNP.UPNP_RESULT_NO_DEVICES else "no UPnP router found (%d)" % err}
+	var gw := u.get_gateway()
+	if gw == null or not gw.is_valid_gateway():
+		return {"ok": false, "why": "the router doesn't do UPnP"}
+	var lease := UPNP_LEASE
+	err = u.add_port_mapping(port, port, "IdleFarm", "UDP", lease)
+	if err != UPNP.UPNP_RESULT_SUCCESS:
+		lease = 0   # some routers only take permanent mappings
+		err = u.add_port_mapping(port, port, "IdleFarm", "UDP", 0)
+	if err != UPNP.UPNP_RESULT_SUCCESS:
+		return {"ok": false, "why": "the router said no (%d)" % err}
+	return {"ok": true, "ip": u.query_external_address(), "upnp": u, "lease": lease}
+
+
+func _finish_upnp() -> void:
+	var r: Dictionary = _upnp_thread.wait_to_finish()
+	_upnp_thread = null
+	if mode != "hosting":
+		_unmap(r.get("upnp"))   # stopped hosting while we waited
+		return
+	if r.get("ok", false):
+		upnp_state = "open"
+		_upnp = r.get("upnp")
+		external_ip = String(r.get("ip", ""))
+		upnp_lease = int(r.get("lease", 0))
+		_set_status("Port open! Your friend joins at %s." % share_address())
+	else:
+		upnp_state = "failed"
+		upnp_why = String(r.get("why", "unknown"))
+		_set_status("Hosting, but the router wouldn't open the port (%s). Same network: %s" % [upnp_why, share_address()])
+
+
+func _unmap(u: Variant) -> void:
+	if u is UPNP and host_port > 0:
+		(u as UPNP).delete_port_mapping(host_port, "UDP")
+
+
+## This machine's addresses on the local network (IPv4, private ranges).
+func lan_addresses() -> Array:
+	var out: Array = []
+	for a in IP.get_local_addresses():
+		if a.begins_with("10.") or a.begins_with("192.168."):
+			out.append(a)
+		elif a.begins_with("172."):
+			var b := int(a.get_slice(".", 1))
+			if b >= 16 and b <= 31:
+				out.append(a)
+	return out
+
+
+## What the friend should type: the internet address if the router opened the port, else this
+## PC's address on the local network.
+func share_address() -> String:
+	var port := host_port if host_port > 0 else PORT
+	if upnp_state == "open" and external_ip != "":
+		return "%s:%d" % [external_ip, port]
+	var lan := lan_addresses()
+	return "%s:%d" % [lan[0] if not lan.is_empty() else "127.0.0.1", port]
+
+
+func copy_address() -> void:
+	DisplayServer.clipboard_set(share_address())
+
+
+## Lines for the hosting panel: what to share, and what to do if the router didn't play along.
+func help_lines() -> Array:
+	var lines: Array = []
+	match upnp_state:
+		"working":
+			lines.append("Asking your router to open the port...")
+		"open":
+			lines.append("Friend types: %s" % share_address())
+			var lan := lan_addresses()
+			if not lan.is_empty():
+				lines.append("On the same network: %s:%d" % [lan[0], host_port])
+		_:
+			lines.append("Same network: %s" % share_address())
+			if upnp_state == "failed":
+				lines.append("Router: %s." % upnp_why)
+			lines.append("Over the internet: forward UDP port %d to this PC in your router." % host_port)
+	lines.append("Windows may ask to let the game through the firewall: allow it.")
+	return lines
+
+
+## "1.2.3.4:5678" / "host.name" / "[::1]:5678" -> ["1.2.3.4", 5678] (default port), [] if it's no address.
+static func parse_address(text: String) -> Array:
+	var t := text.strip_edges()
+	if t == "" or " " in t:
+		return []
+	var ip := t
+	var port := PORT
+	if t.begins_with("["):   # [ipv6]:port
+		var close := t.find("]")
+		if close < 0:
+			return []
+		ip = t.substr(1, close - 1)
+		var rest := t.substr(close + 1)
+		if rest != "":
+			if not rest.begins_with(":") or not rest.substr(1).is_valid_int():
+				return []
+			port = int(rest.substr(1))
+	elif t.count(":") == 1:
+		ip = t.get_slice(":", 0)
+		var p := t.get_slice(":", 1)
+		if not p.is_valid_int():
+			return []
+		port = int(p)
+	elif t.count(":") > 1:
+		ip = t   # a bare IPv6 address
+	if ip == "" or port < 1 or port > 65535:
+		return []
+	if ip.is_valid_ip_address():
+		return [ip, port]
+	# a host name: letters, digits, dots and dashes
+	for ch in ip:
+		if not (ch == "." or ch == "-" or (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z") or (ch >= "0" and ch <= "9")):
+			return []
+	if ip.split(".").size() == 4 and ip.replace(".", "").is_valid_int():
+		return []   # looks like an IPv4 address but isn't one (999.1.1.1)
+	return [ip, port]
 
 
 func _on_peer_connected(id: int) -> void:
@@ -173,6 +342,13 @@ func fx(kind: String, args: Array) -> void:
 
 
 func _process(delta: float) -> void:
+	if _upnp_thread and not _upnp_thread.is_alive():
+		_finish_upnp()
+	if mode == "joining":
+		_join_t -= delta
+		if _join_t <= 0.0:
+			stop(false)
+			_set_status("No answer from %s. Is your friend's game open and hosting? Check the address and port." % _join_addr)
 	for id in _hello_wait.keys():
 		_hello_wait[id] -= delta
 		if _hello_wait[id] <= 0.0:
@@ -267,7 +443,9 @@ func join(ip: String, port: int = PORT, slot: int = 1) -> Error:
 	_peer.host.compress(ENetConnection.COMPRESS_ZSTD)
 	multiplayer.multiplayer_peer = _peer
 	mode = "joining"
-	_set_status("Connecting to %s:%d..." % [ip, port])
+	_join_t = JOIN_TIMEOUT
+	_join_addr = "%s:%d" % [ip, port]
+	_set_status("Connecting to %s..." % _join_addr)
 	return OK
 
 
@@ -281,8 +459,8 @@ func _on_connected() -> void:
 
 
 func _on_connection_failed() -> void:
-	_set_status("Couldn't reach the host.")
-	stop()
+	stop(false)
+	_set_status("Couldn't reach %s. Is your friend's game open and hosting?" % _join_addr)
 
 
 func _on_server_disconnected() -> void:
@@ -301,7 +479,10 @@ func _host_gone() -> void:
 	stop(false)
 	if was_guest and main:
 		main.host_left()
-		_set_status("The host left. The farm is yours now.")
+		if last_exit == "bye":
+			_set_status("Your friend went home. The farm is yours now.")
+		else:
+			_set_status("Lost the connection to your friend. The farm is yours now.")
 	else:
 		_set_status("The host closed the connection.")
 
@@ -321,8 +502,8 @@ func _bye() -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func _reject(reason: String) -> void:
-	_set_status("The host said no: %s" % reason)
-	stop()
+	stop(false)
+	_set_status("Couldn't join: %s" % reason)
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -461,6 +642,11 @@ func stop(bye: bool = true) -> void:
 	_peer = null
 	if was_hosting and guest_pid != "":
 		Game.present.erase(guest_pid)
+	if _upnp:
+		_unmap(_upnp)   # a quick request to the router
+		_upnp = null
+	upnp_state = ""
+	external_ip = ""
 	mode = "offline"
 	guest_peer = 0
 	guest_pid = ""

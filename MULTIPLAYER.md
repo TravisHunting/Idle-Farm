@@ -6,14 +6,17 @@
 > whole phase is done. Keep `tests/sim_test.gd` green after every task: single player must never break.
 
 ## Status
-- **Current phase:** 3 (connectivity: UPnP). Phases 0-2 are done (2026-10-24).
-- **Last done:** 2.5 clean exits (goodbye message); `tests/run_net_test.sh` now plays the full
-  host -> leave -> fork -> swap roles -> rejoin -> leave round trip.
-- **Next task:** 3.1 UPnP in a thread.
+- **Current phase:** 4 (UI). Phases 0-3 are done (2026-10-24). Real-router UPnP was tried once with the
+  user's OK (`-s tests/net_test.gd -- role=solo upnp=1`): no UPnP device answered on their network (gateway
+  192.168.1.254, Wi-Fi on the Windows "Public" profile), so the fallback path ran and nothing was mapped. A
+  successful real mapping is still unverified (5.3). Only run `upnp=1` with the user's OK.
+- **Last done:** 3.4 guest errors; `tests/run_net_test.sh` now also runs a single-copy `role=solo` check.
+- **Next task:** 4.1 text entry widget.
 - **Known blockers:** none.
-- **Multiplayer test:** `bash tests/run_net_test.sh` (~50s) starts two headless copies on localhost
-  (A = `role=host`, B = `role=guest profile=2`, ports P and P+1) and must pass on both sides. It
-  covers phases 1-2 end to end (see the header of `tests/net_runner.gd`). For a look at the guest's screen, run the
+- **Multiplayer test:** `bash tests/run_net_test.sh` (~50s) starts three headless copies on localhost
+  (A = `role=host`, B = `role=guest profile=2`, ports P and P+1; plus `role=solo profile=3` on P+5) and all
+  must pass. It covers phases 1-3 (see the header of `tests/net_runner.gd`). Tests set `Net.use_upnp = false`
+  unless given `upnp=1`, and fake the router with `Net.upnp_fake`. For a look at the guest's screen, run the
   guest without `--headless` and add `shot=<file.png>` (see `tests/net_runner.gd`).
 - **Test baseline:** `sim_test` was flaky before multiplayer work started: even with a fixed `seed=N`, a few
   faction checks fail at random ("rabbit caught in a web", "aliens cataclysm wipes them out", "the
@@ -136,14 +139,14 @@ Autoload `Net` (`scripts/net.gd`), the same node path on both sides, so RPCs jus
   down the peer when the game tree is torn down (`main.back_to_menu`, F5).
 
 ### Phase 3: connectivity
-- [ ] **3.1 UPnP** in a `Thread` (discover blocks for ~2s): `discover()`, `add_port_mapping(port, port,
+- [x] **3.1 UPnP** in a `Thread` (discover blocks for ~2s): `discover()`, `add_port_mapping(port, port,
   "IdleFarm", "UDP")`, `query_external_address()`; remove the mapping on stop/quit. Report each
   outcome through `status_changed`.
-- [ ] **3.2 Address to share**: external `IP:port` when UPnP worked, plus LAN addresses
+- [x] **3.2 Address to share**: external `IP:port` when UPnP worked, plus LAN addresses
   (`IP.get_local_addresses()`, IPv4 private ranges); a copy button (`DisplayServer.clipboard_set`).
-- [ ] **3.3 Fallback text** when UPnP fails: "forward UDP 24680 to this PC, or play on the same
+- [x] **3.3 Fallback text** when UPnP fails: "forward UDP 24680 to this PC, or play on the same
   network". Note that Windows Firewall asks to allow the game the first time it hosts.
-- [ ] **3.4 Guest errors**: connect timeout (~8s), bad address, rejected (show the reason), lost
+- [x] **3.4 Guest errors**: connect timeout (~8s), bad address, rejected (show the reason), lost
   connection.
 
 ### Phase 4: UI (pixel font, built in code like the rest)
@@ -235,6 +238,24 @@ Autoload `Net` (`scripts/net.gd`), the same node path on both sides, so RPCs jus
 - Not covered by a test yet: a real dropped connection (the "lost" / 5s-timeout path); it uses the same
   `_host_gone()` code as a bye.
 
+### Phase 3 notes (what exists now)
+- `Net.host()` starts `_start_upnp(port)` when `Net.use_upnp` (default true): a `Thread` runs `_upnp_job`
+  (discover 2s -> valid gateway -> `add_port_mapping(port, port, "IdleFarm", "UDP", 0)` ->
+  `query_external_address`), and `_process` picks up the result. The mapping asks for a 2h lease
+  (`UPNP_LEASE`, so a crash doesn't leave it open forever) and falls back to permanent if the router refuses
+  leases; `Net.upnp_lease` says which. With `upnp=1` the solo test asks the router afterwards to delete the
+  mapping again and expects "no such mapping". `Net.upnp_state` "" / working / open / failed,
+  `upnp_why`, `external_ip`. `stop()` deletes the mapping (a quick blocking request); `_exit_tree` waits for a
+  thread that's still running.
+- `Net.share_address()` (internet `ip:port` if the port is open, else the first LAN address), `lan_addresses()`
+  (IPv4 private ranges), `copy_address()` (clipboard), `help_lines()` (what to share, why the router said no,
+  forward UDP <port>, the Windows firewall prompt) for the hosting panel (4.3).
+- `Net.parse_address(text)` -> `[host, port]` or `[]` (IPv4, `[v6]:port`, bare v6, host names; default port
+  24680) for the join screen (4.1/4.2).
+- Guest errors: `JOIN_TIMEOUT` 8s ("No answer from ...: is your friend's game open and hosting?"), connection
+  failed, `Couldn't join: <host's reason>`, host gone with "went home" vs "lost the connection" (`last_exit`).
+- Status texts are full sentences in `Net.status` / `status_changed`; the UI only has to show them.
+
 ## Risks / gotchas to keep in mind
 - `World.from_dict` rebuilds actors: never call it per snapshot on the guest (task 1.4 split).
 - Anything that mutates state from a timer/tween/await bypasses the puppet gate: audit in 0.6.
@@ -258,3 +279,9 @@ Autoload `Net` (`scripts/net.gd`), the same node path on both sides, so RPCs jus
 - 2026-10-24: phase 2 done (2.1-2.5). `main.host_left()`, `Net._host_gone/_bye/last_exit`, graceful
   `Net.stop`; `tests/net_runner.gd` rewritten as an A/B role-swap scenario; passes twice in a row on both
   sides; sim_test multiplayer checks still pass.
+- 2026-10-24: phase 3 done (3.1-3.4), real-router UPnP still untested. UPnP thread + port unmapping,
+  share/LAN addresses, help text, `parse_address`, join timeout and clearer errors; `role=solo` test
+  (14 address cases, faked router yes/no, an 8s join timeout). All three copies pass.
+- 2026-10-24: 2h UPnP lease with a permanent fallback; clearer "no router answered" text. Real-router run (user
+  OK'd): no UPnP device answered on the user's network (5s discovery, any device type), nothing was mapped,
+  the fallback text showed. Likely UPnP off on the ISP router at .254, or the Public network profile.
