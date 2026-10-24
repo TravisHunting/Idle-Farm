@@ -10,4 +10,5 @@ Update its checkboxes and Changelog whenever you finish something.
 - Aliens: `scripts/colony.gd` (faction) + `scripts/alien.gd` (individuals); mutant insects:
   `scripts/swarm.gd` + `scripts/insect.gd`; balance of power: `scripts/tides.gd`.
 - Card content lives in `scripts/deck.gd` (documented mini-language); card logic in `scripts/cards.gd`.
+- Multiplayer work (v0.7): follow `MULTIPLAYER.md` (status, decisions, ordered task checklist); keep it updated.
 - Also read `AGENTS.md` (this is a Godot game; headless-first dev model).

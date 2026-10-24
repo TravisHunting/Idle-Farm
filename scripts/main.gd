@@ -15,6 +15,7 @@ var cards: Node
 var colony: Colony
 var swarm: Swarm
 var tides: Tides
+var commands: Commands
 var hud: Control
 var farm_view: Control
 var weather_fx: Node2D
@@ -151,6 +152,14 @@ func _build() -> void:
 	tides.colony = colony
 	tides.swarm = swarm
 	_game_root.add_child(tides)
+	commands = Commands.new()
+	commands.name = "Commands"
+	commands.cards = cards
+	commands.director = director
+	commands.colony = colony
+	commands.swarm = swarm
+	commands.tides = tides
+	_game_root.add_child(commands)
 
 	var layer := CanvasLayer.new()
 	layer.layer = 1
@@ -161,6 +170,7 @@ func _build() -> void:
 	hud.director = director
 	hud.cards = cards
 	hud.main = self
+	hud.commands = commands
 	layer.add_child(hud)
 
 
@@ -248,7 +258,7 @@ func save_game() -> void:
 		return
 	var meta := {"day": Game.day, "level": Game.level(), "wealth": Game.wealth(), "weird": int(Game.weird),
 		"relics": Game.relics.size(), "play_seconds": Game.play_seconds, "farm": Game.farm_name}
-	var d := {"version": 3, "time": Time.get_unix_time_from_system(), "meta": meta,
+	var d := {"version": 4, "time": Time.get_unix_time_from_system(), "meta": meta,
 		"game": Game.to_dict(), "world": world.to_dict()}
 	var fa := FileAccess.open(Game.slot_path(Game.slot), FileAccess.WRITE)
 	if fa:
@@ -267,6 +277,8 @@ func load_game() -> bool:
 	var d: Dictionary = parsed
 	Game.from_dict(d.get("game", {}))
 	world.from_dict(d.get("world", {}))
+	if Game.owner_pid != Game.my_pid:
+		Game.fork()   # someone else's world, kept from a shared game: it's ours now
 	_offline_progress(Time.get_unix_time_from_system() - float(d.get("time", 0.0)))
 	return true
 
@@ -320,17 +332,14 @@ func _offline_progress(seconds: float) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not OS.is_debug_build() or not (event is InputEventKey) or not event.pressed or world == null:
 		return
+	const DEBUG_KEYS := {KEY_F1: "draw", KEY_F2: "fill", KEY_F3: "event", KEY_F6: "weird", KEY_F7: "alien",
+		KEY_F8: "tides", KEY_F9: "brood", KEY_F10: "locusts", KEY_F11: "cataclysm"}
+	if DEBUG_KEYS.has(event.keycode):
+		commands.submit({"type": "debug", "key": DEBUG_KEYS[event.keycode]})
+		return
 	match event.keycode:
-		KEY_F1:
-			cards.draw_card()
-		KEY_F2:
-			for i in Game.BOX_SIZE:
-				cards.draw_card()
-		KEY_F3:
-			director.random_event()
 		KEY_F4:
-			Game.set_speed(10 if Game.time_scale == 1.0 else 1)
-			Game.add_log("Game speed x%d" % int(Game.time_scale))
+			commands.submit({"type": "speed", "n": 10 if Game.time_scale == 1.0 else 1})
 		KEY_F5:
 			var s := Game.slot
 			Game.running = false
@@ -339,15 +348,3 @@ func _unhandled_input(event: InputEvent) -> void:
 			world = null
 			delete_slot(s)
 			show_welcome(1)
-		KEY_F6:
-			Game.add_weird(10.0)
-		KEY_F7:
-			colony.arrive("")
-		KEY_F8:
-			tides.turn()
-		KEY_F9:
-			swarm.arrive("")
-		KEY_F10:
-			swarm.launch_swarm("")
-		KEY_F11:
-			tides.roll_cataclysm(["aliens", "insects", "wild", "farm"].pick_random())

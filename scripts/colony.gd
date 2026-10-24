@@ -214,7 +214,7 @@ func make_name() -> String:
 
 # ---------------------------------------------------------------- simulation
 func _process(delta: float) -> void:
-	if not Game.running or world == null:
+	if not Game.simulating() or world == null:
 		return
 	_acc += delta * Game.time_scale
 	if _acc >= 2.0:

@@ -14,6 +14,7 @@ const THREATS := ["crow", "rabbit", "fox", "boar", "snake", "wasps"]
 const FACES_LEFT := ["rabbit", "fox", "boar", "chicken", "dog", "goat"]
 
 var world  # World
+var uid := 0      # stable actor id (World.new_uid), used to match actors across the network
 var kind := ""
 var pos := Vector2.ZERO
 var state := "enter"
@@ -41,6 +42,7 @@ var job: Variant = null
 
 func _init(w, k: String, p: Vector2) -> void:
 	world = w
+	uid = w.new_uid()
 	kind = k
 	pos = p
 	home = p
@@ -437,7 +439,7 @@ func _update_merchant(d: float) -> void:
 				else:
 					say("Nothing to trade? Next time!")
 				if randf() < 0.3:
-					Game.draw_requested.emit()
+					Game.draw_requested.emit("")
 					Game.add_log("The merchant left a card on the step.")
 				_leave()
 		"leave":
@@ -674,8 +676,9 @@ func draw(ci: CanvasItem) -> void:
 
 
 func to_dict() -> Dictionary:
-	return {"kind": kind, "x": pos.x, "y": pos.y, "hx": home.x, "hy": home.y}
+	return {"uid": uid, "kind": kind, "x": pos.x, "y": pos.y, "hx": home.x, "hy": home.y}
 
 
 func from_dict(d: Dictionary) -> void:
+	uid = int(d.get("uid", uid))
 	home = Vector2(float(d.get("hx", pos.x)), float(d.get("hy", pos.y)))

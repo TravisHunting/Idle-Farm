@@ -31,7 +31,7 @@ var _playing_all := false
 
 
 func _process(delta: float) -> void:
-	if not Game.running:
+	if not Game.simulating():
 		return
 	var d := delta * Game.time_scale
 	weather_t -= d

@@ -90,6 +90,6 @@ func _snap(name: String) -> void:
 
 
 func _wipe() -> void:
-	var p := ProjectSettings.globalize_path("user://slot_%d.json" % SLOT)
+	var p := ProjectSettings.globalize_path(Game.slot_path(SLOT))
 	if FileAccess.file_exists(p):
 		DirAccess.remove_absolute(p)

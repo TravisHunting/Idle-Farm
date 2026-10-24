@@ -113,6 +113,7 @@ var BIN := Vector2i(3, 1)
 var BIN_FRONT := Vector2i(3, 2)
 var farmer: Farmer
 var animals: Array = []
+var next_uid := 1                      # actor ids (farmer + animals), stable across saves (multiplayer sync)
 var particles: Array = []              # {p, v, life, c}
 var floats: Array = []                 # {text, p, t, c}
 var entity_layer: Node2D
@@ -951,6 +952,18 @@ func overgrow(n: int, types: Array = ["weed", "tallgrass", "bush", "bramble"]) -
 func _process(delta: float) -> void:
 	var d := delta * Game.time_scale
 	_anim_t += d
+	_update_fx(d)
+	if not Game.puppet:
+		_simulate(d)
+	queue_redraw()
+	if entity_layer:
+		entity_layer.queue_redraw()
+	if fx_layer:
+		fx_layer.queue_redraw()
+
+
+## Everything that changes the farm (off on a guest's machine, see Game.puppet).
+func _simulate(d: float) -> void:
 	_update_ground(d)
 	if farmer:
 		farmer.update(d)
@@ -962,7 +975,6 @@ func _process(delta: float) -> void:
 				colony.on_gone(a)
 			elif a is Insect and swarm:
 				swarm.on_gone(a)
-	_update_fx(d)
 	_weed_t += d
 	if _weed_t > 25.0:
 		_weed_t = 0.0
@@ -977,11 +989,6 @@ func _process(delta: float) -> void:
 			for i in (4 if surge else 1):
 				if cells.size() > 0:
 					place_obj(cells.pick_random(), ["weed", "tallgrass", "bush", "bramble"].pick_random() if surge else ("weed" if randf() < 0.7 else "tallgrass"))
-	queue_redraw()
-	if entity_layer:
-		entity_layer.queue_redraw()
-	if fx_layer:
-		fx_layer.queue_redraw()
 
 
 func growth_mult(c: Vector2i) -> float:
@@ -1059,6 +1066,12 @@ func threats() -> Array:
 		if a.is_threat() and not a.leaving():
 			out.append(a)
 	return out
+
+
+## A fresh actor id (Animal/Farmer _init take one).
+func new_uid() -> int:
+	next_uid += 1
+	return next_uid - 1
 
 
 func add_animal(a: Animal) -> Animal:
@@ -1258,7 +1271,7 @@ func to_dict() -> Dictionary:
 		br["%d,%d" % [c.x, c.y]] = bare[c]
 	return {"alien_land": land, "insect_land": tun, "bare": br, "rows": ROWS, "ground": Array(ground), "wet": Array(wet), "crops": cr, "objs": ob, "animals": an,
 		"farmer": farmer.to_dict() if farmer else {}, "fields": fl, "biome": biome,
-		"house": "%d,%d" % [house.x, house.y], "bin": "%d,%d" % [BIN.x, BIN.y]}
+		"house": "%d,%d" % [house.x, house.y], "bin": "%d,%d" % [BIN.x, BIN.y], "next_uid": next_uid}
 
 
 func from_dict(d: Dictionary) -> void:
@@ -1315,9 +1328,11 @@ func from_dict(d: Dictionary) -> void:
 	for k in br:
 		bare[_key_cell(String(k))] = float(br[k])
 	animals.clear()
+	next_uid = int(d.get("next_uid", 1))
 	farmer = Farmer.new(self)
 	farmer.pos = feet(DOOR)
 	farmer.from_dict(d.get("farmer", {}))
+	var top := farmer.uid
 	for ad in d.get("animals", []):
 		var kind := String(ad.get("kind", "chicken"))
 		var ap := Vector2(float(ad.get("x", 80)), float(ad.get("y", 80)))
@@ -1330,6 +1345,8 @@ func from_dict(d: Dictionary) -> void:
 			a = Animal.new(self, kind, ap)
 		a.from_dict(ad)
 		animals.append(a)
+		top = maxi(top, a.uid)
+	next_uid = maxi(next_uid, top + 1)
 
 
 ## Old saves were shorter: the new rows at the bottom start out wild.

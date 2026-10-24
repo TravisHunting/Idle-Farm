@@ -104,6 +104,7 @@ changed drastically and lose territory). Four factions compete for the 12x22 far
 | `scripts/art_strange.gd` | Extra ASCII sprites: visitors (`v_*`), relic structures, card art, strange crops, 7x7 relic icons (`r_*`). |
 | `scripts/game.gd` (autoload **Game**) | Global state: coins, level, clock/day, weather, hand of cards + drip timer, weirdness, relics, unlocked crops, favoured crop, pending (delayed) effects, buffs, farmer stats, inventory, log; data tables CROPS, STRUCTS, RELICS; slot paths + settings file. |
 | `scripts/deck.gd` (class **Deck**) | **The card content** (70 cards, pure data). Its header documents every requirement and effect keyword. Add new cards here. |
+| `scripts/commands.gd` (class **Commands**) | Every player action as a command (`submit` / `execute(pid, cmd)`): play a card, move a card, card cadence, speed, debug keys. Validates everything (multiplayer, see `MULTIPLAYER.md`). |
 | `scripts/cards.gd` | **Card engine**: weighted drawing (rarity, level, weirdness, `needs`), requirement checks with progress text, auto-costs, effect interpreter (`apply`), gamble/delay, relic gain/loss + passives (daily/dawn/night hooks), companion actors. |
 | `scripts/welcome.gd` | Welcome screen: how-to-play page, then 3 save slots with summaries + delete. |
 | `scripts/main.gd` | Welcome -> slot -> builds the game tree in code (under GameRoot; torn down on menu), window docking (centred right with padding), per-slot save/load + offline progress, debug keys. |
@@ -274,6 +275,12 @@ Key systems added in v0.3:
 - [x] Comebacks: re-arrivals, wild floods back after the silence, the farmer breaks new ground
 - [x] Verified headless: forced cataclysms wipe each faction and both the farm and the wild return; long natural runs (see changelog)
 
+### v0.7: two-player "join world" (in progress)
+- [ ] Multiplayer: host-authoritative ENet + UPnP, join by IP, per-player card boxes, both keep a
+  copy when someone leaves. **Full plan, decisions and task checklist: `MULTIPLAYER.md`.**
+  - [x] Phase 0: player ids + profiles, per-player hands, command layer, actor ids, world ids, puppet mode
+  - [ ] Phase 1-5: networking, leaving/forking, UPnP, UI, two-machine tests
+
 ## Next up / ideas (not started)
 - [ ] Balance pass on the deck (reward sizes vs. level scaling; how fast weirdness climbs)
 - [ ] More follow-up chains (tome -> ritual -> ?, the homunculus grows up, the stranger's contract)
@@ -305,6 +312,12 @@ Key systems added in v0.3:
   variable an explicit type instead of `:=`.
 
 ## Changelog
+- 2026-10-24 - v0.7 phase 0 (multiplayer prep, single player unchanged): `Game.hands` per player
+  (save v4 migrates old saves), `scripts/commands.gd` command layer (HUD + debug keys go through it),
+  stable actor `uid`s, `world_id`/`fork()`, `Game.puppet` gate on every sim loop, `-- profile=N` for two
+  copies on one PC. New sim_test section. Note: sim_test was already flaky on a few faction checks.
+- 2026-10-24 - planned v0.7 multiplayer (two players share one world, host-authoritative over
+  ENet + UPnP, join by IP; no merging, both keep a copy on leave). Plan + checklist in `MULTIPLAYER.md`.
 - 2026-10-21 - v0.6: cataclysms. The tides can now wipe any faction out completely (hive-sickness /
   recall, the long frost, the scorching, the dark harvest), aimed mostly at the dominant faction;
   extinctions and returns are tracked and logged, the wild falls silent and then floods back, and

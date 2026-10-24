@@ -49,6 +49,7 @@ func _run() -> void:
 	_test_cataclysms()
 	_reset_aliens()
 	_test_natural_run()
+	_test_multiplayer_prep()
 	await _test_save_roundtrip()
 
 	_wipe()
@@ -135,7 +136,7 @@ func _reset_aliens() -> void:
 
 
 func _wipe() -> void:
-	var p := ProjectSettings.globalize_path("user://slot_%d.json" % SLOT)
+	var p := ProjectSettings.globalize_path(Game.slot_path(SLOT))
 	if FileAccess.file_exists(p):
 		DirAccess.remove_absolute(p)
 
@@ -490,8 +491,95 @@ func _test_natural_run() -> void:
 
 
 # ---------------------------------------------------------------- 5. save / load
+## MULTIPLAYER.md phase 0: per-player hands, the command layer, actor ids, world ids, puppet mode.
+## Leaves a fake guest hand (GUEST) in place for the save round trip to check.
+func _test_multiplayer_prep() -> void:
+	print("== multiplayer prep")
+	var cmd: Commands = main.commands
+	var me := Game.my_pid
+	check(Game.owner_pid == me, "a solo world is owned by the local player")
+	check(Game.world_id.length() == 16, "the world has an id")
+	# an old (v3) save: one box + stash becomes the owner's hand
+	var keep: Dictionary = Game.to_dict().duplicate(true)
+	var old := keep.duplicate(true)
+	old.erase("hands")
+	old.erase("owner_pid")
+	old["box"] = ["harvest_moon", "", ""]
+	old["stash"] = ["", "", "taxman"]
+	Game.from_dict(old)
+	check(Game.owner_pid == me and Game.card_at("box", 0) == "harvest_moon" and Game.card_at("stash", 2) == "taxman",
+		"a pre-multiplayer save's box/stash becomes the owner's hand")
+	Game.from_dict(keep)
+	# a guest's hand is separate from ours
+	var g := GUEST
+	Game.hand(g)
+	var id := ""
+	var which := ""
+	for attempt in 20:
+		Game.hand(g)["box"] = ["", "", ""]
+		id = main.cards.draw_card(g)
+		var c: Dictionary = main.cards.card(id)
+		for w in ["a", "b"]:
+			if which == "" and not c.is_empty() and main.cards.can_choose(c, w):
+				which = w
+		if which != "":
+			break
+	check(which != "", "found a playable card for the guest")
+	check(Game.card_at("box", 0, g) == id and not id in Game.box, "a card drawn for the guest lands in the guest's box only")
+	check(not cmd.execute(g, {"type": "choose", "where": "hat", "i": 0, "which": which}), "a bad slot name is rejected")
+	check(not cmd.execute(g, {"type": "choose", "where": "box", "i": 99, "which": which}), "a bad slot index is rejected")
+	check(not cmd.execute(g, {"type": "choose", "where": "box", "i": 0, "which": "c"}), "a bad choice is rejected")
+	check(not cmd.execute("nobody", {"type": "move_card", "from": "box", "fi": 0, "to": "stash", "ti": 0}), "an unknown player is rejected")
+	check(not cmd.execute(g, {"type": "card_minutes", "n": 5}), "a guest can't change the card cadence")
+	check(not cmd.execute(g, {"type": "debug", "key": "draw"}), "a guest can't use debug commands")
+	check(cmd.execute(g, {"type": "choose", "where": "box", "i": 0, "which": which}), "the guest plays a card by command")
+	check(Game.card_at("box", 0, g) == "" and Game.played.get(id, "") == which, "the guest's card is used up and recorded")
+	main.cards.draw_card(g)
+	var gid := Game.card_at("box", 0, g)
+	check(cmd.execute(g, {"type": "move_card", "from": "box", "fi": 0.0, "to": "stash", "ti": 1}), "the guest moves a card by command")
+	check(Game.card_at("stash", 1, g) == gid and Game.card_at("box", 0, g) == "", "the guest's card moved within the guest's hand")
+	# who gets cards nobody asked for
+	Game.acting_pid = g
+	var gid2: String = main.cards.draw_card()
+	Game.acting_pid = ""
+	check(Game.card_at("box", 0, g) == gid2, "a card caused by the guest's action goes to the guest")
+	var oid: String = main.cards.draw_card()
+	check(Game.card_at("box", 0) == oid, "other pushed cards go to the owner")
+	# only present players' cards drip in
+	Game.hand(g)["card_timer"] = Game.card_interval() - 1.0
+	step(2.0)
+	check(float(Game.hand(g)["card_timer"]) == Game.card_interval() - 1.0, "an absent player's card timer is frozen")
+	# actor ids
+	var uids := {main.world.farmer.uid: true}
+	for a in main.world.animals:
+		uids[a.uid] = true
+	check(main.world.farmer.uid > 0 and uids.size() == main.world.animals.size() + 1, "every actor has a unique id")
+	# puppet mode: nothing changes
+	main.colony.arrive("saucer")
+	main.swarm.arrive("hive")
+	step(30.0)
+	Game.puppet = true
+	var before := var_to_bytes([Game.to_dict(), main.world.to_dict()])
+	step(60.0)
+	var after := var_to_bytes([Game.to_dict(), main.world.to_dict()])
+	Game.puppet = false
+	check(before == after, "60s in puppet mode leave the world untouched")
+	step(5.0)
+	check(var_to_bytes([Game.to_dict(), main.world.to_dict()]) != after, "the world moves again after puppet mode")
+
+
+const GUEST := "guest000000000ff"
+
+
 func _test_save_roundtrip() -> void:
 	print("== save/load")
+	var guest_stash := Game.card_at("stash", 1, GUEST)
+	var wid := Game.world_id
+	var fuid: int = main.world.farmer.uid
+	var auids := {}
+	for a in main.world.animals:
+		if a.persistent():
+			auids[a.uid] = true
 	var col: Colony = main.colony
 	if not col.active():
 		col.arrive("saucer")
@@ -524,5 +612,26 @@ func _test_save_roundtrip() -> void:
 	check(bugs().size() >= nb - 1, "insects survive a reload")
 	check(main.world.insect_land.size() == tun, "tunnels survive a reload")
 	check(main.swarm.mounds().size() == mnd, "mounds survive a reload")
+	check(Game.world_id == wid and Game.owner_pid == Game.my_pid, "the world id and owner survive a reload")
+	check(guest_stash != "" and Game.card_at("stash", 1, GUEST) == guest_stash, "the guest's hand survives a reload")
+	check(main.world.farmer.uid == fuid, "the farmer's id survives a reload")
+	var kept := 0
+	for a in main.world.animals:
+		if auids.has(a.uid):
+			kept += 1
+	check(kept >= auids.size() - 1, "animal ids survive a reload (%d of %d)" % [kept, auids.size()])
+	var fresh: Animal = main.world.add_animal(Animal.new(main.world, "chicken", Vector2(40, 200)))
+	check(not auids.has(fresh.uid) and fresh.uid != fuid, "new actors after a reload get new ids")
 	step(30.0)
 	check(true, "the reloaded colony keeps running")
+	# a slot saved as someone's guest becomes our own fork when we open it
+	Game.owner_pid = GUEST
+	main.save_game()
+	main.back_to_menu()
+	await get_tree().process_frame
+	main.start_slot(SLOT)
+	Game.running = true
+	await get_tree().process_frame
+	check(Game.owner_pid == Game.my_pid and Game.forked_from == wid and Game.world_id != wid,
+		"opening a slot owned by someone else forks it")
+	Game.hands.erase(GUEST)

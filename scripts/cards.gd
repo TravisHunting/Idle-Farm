@@ -45,8 +45,8 @@ func _title_of(id: String) -> String:
 	return String(card(id).get("title", id))
 
 
-func _on_draw_requested() -> void:
-	draw_card()
+func _on_draw_requested(pid: String) -> void:
+	draw_card(pid)
 
 
 func card(id: String) -> Dictionary:
@@ -68,7 +68,8 @@ func eligible(c: Dictionary) -> bool:
 	return true
 
 
-func draw_card() -> String:
+## A random eligible card into a player's box ("" = owner / acting player, see Game.card_target).
+func draw_card(pid: String = "") -> String:
 	var pool: Array = []
 	var weights: Array = []
 	var total := 0.0
@@ -91,9 +92,9 @@ func draw_card() -> String:
 	for i in pool.size():
 		r -= weights[i]
 		if r <= 0.0:
-			Game.add_card(pool[i])
+			Game.add_card(pool[i], pid)
 			return pool[i]
-	Game.add_card(pool[pool.size() - 1])
+	Game.add_card(pool[pool.size() - 1], pid)
 	return pool[pool.size() - 1]
 
 
@@ -281,15 +282,21 @@ func can_choose(c: Dictionary, which: String) -> bool:
 
 
 ## Plays the card in box/stash slot `i`.
-func choose(where: String, i: int, which: String) -> bool:
-	var id := Game.card_at(where, i)
+## Plays a card from a player's box/stash ("" = the local player).
+func choose(where: String, i: int, which: String, pid: String = "") -> bool:
+	if pid == "":
+		pid = Game.my_pid
+	var id := Game.card_at(where, i, pid)
 	var c := card(id)
 	if c.is_empty() or not can_choose(c, which):
 		return false
 	var ch: Dictionary = c[which]
-	Game.take_card(where, i)
+	Game.take_card(where, i, pid)
 	Game.played[id] = which
-	Game.add_log("%s: %s." % [c["title"], ch["label"]])
+	if Game.hands.size() > 1:
+		Game.add_log("%s chose %s: %s." % [Game.player_name(pid), c["title"], ch["label"]])
+	else:
+		Game.add_log("%s: %s." % [c["title"], ch["label"]])
 	if c.get("visitor", false):
 		var crowd := int(c.get("crowd", 1))
 		for k in crowd:
@@ -298,7 +305,9 @@ func choose(where: String, i: int, which: String) -> bool:
 			v.reply = ch.get("reply", "...") if k == 0 else ""
 			if k > 0:
 				v.tint = [Color("f7c6a0"), Color("f19ec2"), Color("a7f070"), Color("73eff7")][k % 4]
+	Game.acting_pid = pid
 	apply(ch.get("fx", []))
+	Game.acting_pid = ""
 	world.prune_fields()
 	chosen.emit(id, which)
 	return true
@@ -462,7 +471,7 @@ func _apply_one(e: Array) -> void:
 				world.float_text("UNLUCKY...", fp + Vector2(-18, -34), Color("b13e53"))
 				apply(e[3])
 		"delay":
-			Game.pending.append({"t": float(e[1]), "fx": e[2], "note": e[3] if e.size() > 3 else ""})
+			Game.pending.append({"t": float(e[1]), "fx": e[2], "note": e[3] if e.size() > 3 else "", "pid": Game.acting_pid})
 		# ---- farm-shaping effects
 		"clear":
 			var n5: int = world.clear_overgrowth(int(e[1]))
@@ -938,7 +947,7 @@ func friends_visit() -> void:
 
 
 func _process(delta: float) -> void:
-	if not Game.running or world == null:
+	if not Game.simulating() or world == null:
 		return
 	var d := delta * Game.time_scale
 	# delayed consequences
@@ -948,7 +957,9 @@ func _process(delta: float) -> void:
 			Game.pending.erase(p)
 			if String(p.get("note", "")) != "":
 				Game.add_log(p["note"])
+			Game.acting_pid = String(p.get("pid", ""))
 			apply(p["fx"])
+			Game.acting_pid = ""
 	# dawn: bone flute, friends
 	if _last_tod < 0.25 and Game.time_of_day >= 0.25:
 		if Game.has_relic("bone_flute"):

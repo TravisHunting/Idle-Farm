@@ -36,6 +36,7 @@ var world: World
 var director: Node
 var cards: Node
 var main: Node
+var commands: Commands
 
 var hover_slot := []          # ["box"|"stash", i] or []
 var hover_btn := ""
@@ -188,7 +189,7 @@ func _press(p: Vector2) -> void:
 		if hover_choice != "":
 			var c: Dictionary = cards.card(open_id)
 			if cards.can_choose(c, hover_choice):
-				cards.choose(open_where, open_i, hover_choice)
+				commands.submit({"type": "choose", "where": open_where, "i": open_i, "which": hover_choice})
 				_close_modal()
 			return
 		if hover_btn == "later":
@@ -231,7 +232,7 @@ func _release(p: Vector2) -> void:
 		card_drag = false
 		var to := _slot_at(p)
 		if not to.is_empty():
-			Game.move_card(from[0], from[1], to[0], to[1])
+			commands.submit({"type": "move_card", "from": from[0], "fi": from[1], "to": to[0], "ti": to[1]})
 		return
 	_open(from[0], from[1])
 
@@ -259,7 +260,7 @@ func _move_open_card() -> void:
 	var free := arr.find("")
 	if free < 0:
 		return
-	Game.move_card(open_where, open_i, other, free)
+	commands.submit({"type": "move_card", "from": open_where, "fi": open_i, "to": other, "ti": free})
 
 
 func _settings_click(p: Vector2) -> void:
@@ -269,15 +270,13 @@ func _settings_click(p: Vector2) -> void:
 	if cur < 0:
 		cur = opts.find(Game.DEFAULT_CARD_MINUTES)
 	if r["min_down"].has_point(p):
-		Game.settings["card_minutes"] = opts[maxi(0, cur - 1)]
-		Game.save_settings()
+		commands.submit({"type": "card_minutes", "n": opts[maxi(0, cur - 1)]})
 	elif r["min_up"].has_point(p):
-		Game.settings["card_minutes"] = opts[mini(opts.size() - 1, cur + 1)]
-		Game.save_settings()
+		commands.submit({"type": "card_minutes", "n": opts[mini(opts.size() - 1, cur + 1)]})
 	elif r["dock_side"].has_point(p):
 		main.toggle_dock()
 	elif r["next_now"].has_point(p) and OS.is_debug_build():
-		Game.card_timer = Game.card_interval()
+		commands.submit({"type": "debug", "key": "next_card"})
 	elif r["done"].has_point(p) or not PANEL.has_point(p):
 		settings_open = false
 
