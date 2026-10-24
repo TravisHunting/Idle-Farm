@@ -15,6 +15,7 @@ const FACES_LEFT := ["rabbit", "fox", "boar", "chicken", "dog", "goat"]
 
 var world  # World
 var uid := 0      # stable actor id (World.new_uid), used to match actors across the network
+var net_to := Vector2.INF   # on a guest: where the host says this actor is
 var kind := ""
 var pos := Vector2.ZERO
 var state := "enter"
@@ -682,3 +683,18 @@ func to_dict() -> Dictionary:
 func from_dict(d: Dictionary) -> void:
 	uid = int(d.get("uid", uid))
 	home = Vector2(float(d.get("hx", pos.x)), float(d.get("hy", pos.y)))
+
+
+# ---------------------------------------------------------------- multiplayer
+## What a guest needs to draw this actor (Net's actor stream). Timers in Net.DECAYING also run
+## down on the guest by themselves.
+func net_fields() -> Array:
+	return ["pos", "state", "flip", "dead", "hidden", "tint", "sprite", "bubble", "bubble_t"]
+
+
+## A guest's stand-in for update(): animate, run timers down, glide towards the host's position.
+func net_tick(d: float) -> void:
+	anim_t += d
+	bubble_t -= d
+	if net_to.x != INF:
+		pos = pos.lerp(net_to, minf(1.0, d * 8.0))

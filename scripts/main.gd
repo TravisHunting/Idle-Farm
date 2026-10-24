@@ -31,6 +31,7 @@ func _ready() -> void:
 	RenderingServer.set_default_clear_color(Color(0, 0, 0, 0))
 	get_viewport().transparent_bg = true
 	embedded = Engine.is_embedded_in_editor()
+	Net.main = self
 	_setup_window()
 	show_welcome()
 
@@ -46,6 +47,27 @@ func show_welcome(page: int = 0) -> void:
 	welcome.main = self
 	welcome.page = page
 	layer.add_child(welcome)
+
+
+## Join a host's world as a guest (Net._welcome): it is kept in slot n, and runs in puppet mode.
+func start_guest(n: int, d: Dictionary) -> void:
+	if _game_root:
+		Game.running = false
+		_game_root.queue_free()
+		_game_root = null
+		world = null
+	Game.reset()
+	Game.slot = n
+	Game.puppet = true
+	_build()
+	Game.from_dict(d.get("game", {}))
+	Game.time_scale = float(d.get("speed", 1.0))
+	world.from_dict(d.get("world", {}))
+	Game.running = true
+	if welcome:
+		welcome.get_parent().queue_free()
+		welcome = null
+	save_game()
 
 
 func start_slot(n: int) -> void:
@@ -71,7 +93,9 @@ func start_slot(n: int) -> void:
 
 func back_to_menu() -> void:
 	save_game()
+	Net.stop()
 	Game.running = false
+	Game.puppet = false
 	if _game_root:
 		_game_root.queue_free()
 		_game_root = null
@@ -126,7 +150,7 @@ func _build() -> void:
 	director.name = "Director"
 	director.world = world
 	director.weather_fx = weather_fx
-	director.shake.connect(func(a: float) -> void: _shake = maxf(_shake, a))
+	director.shake.connect(shake)
 	_game_root.add_child(director)
 	world.director = director
 
@@ -244,7 +268,14 @@ func minimize() -> void:
 
 func save_and_quit() -> void:
 	save_game()
+	Net.stop()
 	get_tree().quit()
+
+
+## Screen shake (also replayed on a guest's screen).
+func shake(a: float) -> void:
+	_shake = maxf(_shake, a)
+	Net.fx("shake", [a])
 
 
 func _notification(what: int) -> void:
@@ -341,6 +372,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_F4:
 			commands.submit({"type": "speed", "n": 10 if Game.time_scale == 1.0 else 1})
 		KEY_F5:
+			Net.stop()
+			Game.puppet = false
 			var s := Game.slot
 			Game.running = false
 			_game_root.queue_free()

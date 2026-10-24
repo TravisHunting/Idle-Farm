@@ -26,6 +26,7 @@ func _ready() -> void:
 
 
 func strike(p: Vector2) -> void:
+	Net.fx("strike", [p])
 	flash = 1.0
 	bolt_t = 0.25
 	bolt = PackedVector2Array()
@@ -39,11 +40,13 @@ func strike(p: Vector2) -> void:
 
 
 func beam(p: Vector2) -> void:
+	Net.fx("beam", [p])
 	beam_p = p
 	beam_t = 1.5
 
 
 func meteor(p: Vector2) -> void:
+	Net.fx("meteor", [p])
 	meteor_to = p
 	meteor_from = p + Vector2(-90, -160)
 	meteor_t = 0.0

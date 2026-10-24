@@ -315,6 +315,10 @@ func reset() -> void:
 
 
 func _process(delta: float) -> void:
+	if running and puppet:
+		# a guest's clock keeps ticking between the host's snapshots (cosmetic only)
+		time_of_day = fmod(time_of_day + delta * time_scale / DAY_LENGTH, 1.0)
+		return
 	if not simulating():
 		return
 	var d := delta * time_scale

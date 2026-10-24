@@ -6,14 +6,18 @@
 > whole phase is done. Keep `tests/sim_test.gd` green after every task: single player must never break.
 
 ## Status
-- **Current phase:** 1 (net core). Phase 0 is done (2026-10-24).
-- **Last done:** 0.7 phase-0 tests (`_test_multiplayer_prep` + extra save round-trip checks in
-  `tests/sim_runner.gd`).
-- **Next task:** 1.1 the `Net` autoload.
+- **Current phase:** 2 (leaving, forking, rejoining). Phases 0 and 1 are done (2026-10-24).
+- **Last done:** 1.8 bandwidth check (`tests/run_net_test.sh` passes: two copies on localhost).
+- **Next task:** 2.1 guest slot (most of it already happens, see the Phase 1 notes), then 2.2 (the
+  guest is currently left frozen in puppet mode when the host goes away).
 - **Known blockers:** none.
+- **Multiplayer test:** `bash tests/run_net_test.sh` (~45s) starts a headless host and a guest
+  (`profile=2`) on localhost and must pass on both sides. For a look at the guest's screen, run the
+  guest without `--headless` and add `shot=<file.png>` (see `tests/net_runner.gd`).
 - **Test baseline:** `sim_test` was flaky before multiplayer work started: even with a fixed `seed=N`, a few
   faction checks fail at random ("rabbit caught in a web", "aliens cataclysm wipes them out", "the
-  wild comes back", "locust swarm takes off", "creep survives a reload"; the untouched code failed 4/4
+  wild comes back", "locust swarm takes off", "creep survives a reload", "the hatchling lives", "the egg hatched", "the colony grew", "the
+  aliens' share of power moved", "the farm comes back"; the untouched code failed 4/4
   runs on seed 1). Results vary from run to run with the same seed, so something non-seeded feeds the sim. Treat
   "green" as: no `SCRIPT ERROR`, every multiplayer check passes, and only those known faction checks
   may fail. Use `days=4` or more (`days=3` is too short for some checks).
@@ -55,8 +59,10 @@ Autoload `Net` (`scripts/net.gd`), the same node path on both sides, so RPCs jus
 - Channel 0 (reliable): `hello`/`welcome`/`reject`, `cmd` (guest -> host), `state` (host -> guest:
   full Game + World without animals, sent when changed, checked 1x/s, and right after every command),
   `fx` one-shot events, `bye`.
-- Channel 1 (unreliable ordered): `actors` at ~5 Hz: `[uid, kind, pos, facing, anim/state, sprite,
-  tint, speech...]` for the farmer and every animal. The guest interpolates.
+- Channel 1 (reliable, as built): `actors` at ~5 Hz: `[entries, gone, fx]`. An entry is
+  `[uid, kind, caste, {field index: value}]` with only the `net_fields()` that changed since the
+  last send (a full keyframe every 10s); `gone` = uids that disappeared; `fx` = one-shot effects.
+  The guest interpolates positions. (The plan said unreliable; deltas need reliable delivery.)
 - `hello {protocol, game_version, pid, name}` -> host replies `welcome {owner_pid, world_id, state}`
   or `reject {reason}` (version mismatch, world full, host not in a game).
 - `cmd {type, args}`: the host sets `pid` from the sending peer (never trust the guest's), checks
@@ -93,27 +99,27 @@ Autoload `Net` (`scripts/net.gd`), the same node path on both sides, so RPCs jus
   (compare `var_to_bytes(to_dict())`).
 
 ### Phase 1: net core (`scripts/net.gd`, autoload `Net`)
-- [ ] **1.1 Net autoload + states** OFFLINE / HOSTING / JOINING / GUEST, signals
+- [x] **1.1 Net autoload + states** OFFLINE / HOSTING / JOINING / GUEST, signals
   (`peer_joined`, `peer_left`, `status_changed(text)`). `host(port)`: `create_server(port, 1)`;
   `join(ip, port)`: `create_client`; ZSTD compression; ENet peer timeout ~5 s. Register in
   project.godot autoloads (after Game).
-- [ ] **1.2 Handshake**: hello/welcome/reject + `PROTOCOL_VERSION` and game version check; clear
+- [x] **1.2 Handshake**: hello/welcome/reject + `PROTOCOL_VERSION` and game version check; clear
   reject messages.
-- [ ] **1.3 Commands over RPC**: `Commands.submit` on the guest -> `rpc_id(1, "_cmd", ...)`; the
+- [x] **1.3 Commands over RPC**: `Commands.submit` on the guest -> `rpc_id(1, "_cmd", ...)`; the
   host maps sender peer -> pid, validates, executes, marks the state dirty.
-- [ ] **1.4 State snapshots**: the host serializes `Game.to_dict()` + `world.to_dict()` without animals,
+- [x] **1.4 State snapshots**: the host serializes `Game.to_dict()` + `world.to_dict()` without animals,
   sending when the hash changes (checked 1x/s) and right after a command. The guest applies them in puppet
   mode **without** touching local-only state (settings, `my_pid`, speed, the open card modal, HUD
   hover). Split `World.from_dict` so grid/fields/land can be reloaded without rebuilding actors.
-- [ ] **1.5 Actor stream** (~5 Hz, channel 1): add `net_state()` / `net_apply()` to Animal/Farmer
+- [x] **1.5 Actor stream** (~5 Hz, channel 1): add `net_state()` / `net_apply()` to Animal/Farmer
   (only what drawing needs). The guest spawns/despawns by uid and lerps positions; derive walk
   animation/facing from movement.
-- [ ] **1.6 FX forwarding**: when hosting, record one-shot visuals (world puffs/floating text, speech
+- [x] **1.6 FX forwarding**: when hosting, record one-shot visuals (world puffs/floating text, speech
   bubbles, `director.shake`, lightning flash, card-arrival/trash animations) and replay them on
   the guest. Find the spawner functions in world.gd / director.gd / hud.gd first.
-- [ ] **1.7 Guest clock smoothing**: advance `time_of_day` locally between snapshots (cosmetic only,
+- [x] **1.7 Guest clock smoothing**: advance `time_of_day` locally between snapshots (cosmetic only,
   no `new_day` signals in puppet mode).
-- [ ] **1.8 Bandwidth check**: debug-log bytes/s each way and snapshot size; target < 20 KB/s.
+- [x] **1.8 Bandwidth check**: debug-log bytes/s each way and snapshot size; target < 20 KB/s.
   Optimize (diff the grid, lower rates) only if needed.
 
 ### Phase 2: leaving, forking, rejoining
@@ -183,6 +189,34 @@ Autoload `Net` (`scripts/net.gd`), the same node path on both sides, so RPCs jus
 - Not verified in a windowed run yet: the HUD paths now call `commands.submit` (compiles, and the same
   code runs in the headless test, but no clicks have been made).
 
+### Phase 1 notes (what exists now)
+- `scripts/net.gd` (autoload **Net**, registered after Game). `Net.host(port)`, `Net.join(ip, port, slot)`,
+  `Net.stop()`, `Net.mode` (offline/hosting/joining/guest), `Net.status` + `status_changed`,
+  `peer_joined/peer_left(pid)`, `Net.stats` (payload bytes) and `Net.wire()` (bytes on the wire),
+  `-- net_verbose` prints status lines. `PORT` 24680, `PROTOCOL` 1, version from
+  `application/config/version` (unset -> "dev").
+- Host: a hello must arrive within 5s; rejects a protocol/version mismatch, no game running, a second guest, or the
+  host's own pid. On accept: `Game.hand(pid)` (+ `name`), `Game.present[pid]`, log "X joined", sends `_welcome`
+  (Game + World incl. actors + speed). `_cmd` -> `main.commands.execute(guest_pid, cmd)` and an immediate
+  snapshot. State check every 1s (hash of `var_to_bytes`), actors every 0.2s.
+- Guest: `main.start_guest(slot, d)` builds the game tree in puppet mode, loads the welcome and saves it to
+  the slot (the normal 20s autosave keeps saving it; `owner_pid` stays the host's, so opening that slot
+  later forks it, see 0.5). `_state` -> `Game.from_dict` + `World.load_grid` (actors untouched), then
+  `cards_changed`, `card_arrived` for new cards in our box, `log_added`. `Game.time_scale` follows the host.
+- Actors: `net_fields()` on Animal (+Alien, +Insect) and Farmer (`net_tool` wraps `task.tool`); `net_tick(d)` runs
+  instead of `update()` on a guest (anim, bubble/hurt timers, glide to `net_to`, snap if >48px off).
+  Missing actors are created from `kind`/`caste`; `gone` removes them.
+- FX: `World.puff/float_text`, `WeatherFx.strike/beam/meteor` and `main.shake` call `Net.fx()` (no-op unless
+  hosting with a guest); the guest replays them. `director.shake` now connects to `main.shake` (no lambda).
+- `World.to_dict(with_actors)`, `World.load_grid(d)` / `load_actors(d)` (`from_dict` = both).
+- `main.back_to_menu`, `save_and_quit` and F5 call `Net.stop()` (no goodbye message yet: 2.5).
+- Measured (localhost, 21 actors, 15s steady): payload 23.7 KB/s, **wire 6.0 KB/s** (ZSTD), mostly the 1/s
+  state snapshot (~20 KB raw). Joining + a card round trip takes ~2.5s. Good enough; diffing the grid
+  can wait.
+- Known rough edges for later phases: the log says "PLAYER 2 chose..." on both screens (names are 4.x);
+  a guest whose host leaves stays frozen (2.2); nothing restricts the guest's settings panel yet (4.5,
+  the host rejects those commands anyway).
+
 ## Risks / gotchas to keep in mind
 - `World.from_dict` rebuilds actors: never call it per snapshot on the guest (task 1.4 split).
 - Anything that mutates state from a timer/tween/await bypasses the puppet gate: audit in 0.6.
@@ -199,3 +233,7 @@ Autoload `Net` (`scripts/net.gd`), the same node path on both sides, so RPCs jus
 - 2026-10-24: phase 0 done (0.1-0.7). New `scripts/commands.gd`; game/cards/main/hud/world/animal/
   farmer/director/colony/swarm/tides touched; 27 new checks in `tests/sim_runner.gd`, passing on seeds 1-3.
   Found that sim_test was already flaky (see Status).
+- 2026-10-24: phase 1 done (1.1-1.8). New `scripts/net.gd` (autoload), `tests/net_test.gd`,
+  `tests/net_runner.gd`, `tests/run_net_test.sh`; actor `net_fields/net_tick`, `World.load_grid`,
+  `main.start_guest`, FX hooks. Two-copy localhost test passes on both sides; guest screenshot looks right;
+  sim_test's multiplayer checks pass (the puppet check now leaves out the guest's ticking clock).

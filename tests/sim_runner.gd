@@ -559,13 +559,22 @@ func _test_multiplayer_prep() -> void:
 	main.swarm.arrive("hive")
 	step(30.0)
 	Game.puppet = true
-	var before := var_to_bytes([Game.to_dict(), main.world.to_dict()])
+	var before := _frozen()
+	var tod := Game.time_of_day
 	step(60.0)
-	var after := var_to_bytes([Game.to_dict(), main.world.to_dict()])
+	var after := _frozen()
+	check(Game.time_of_day != tod, "the clock keeps ticking in puppet mode (cosmetic)")
 	Game.puppet = false
 	check(before == after, "60s in puppet mode leave the world untouched")
 	step(5.0)
-	check(var_to_bytes([Game.to_dict(), main.world.to_dict()]) != after, "the world moves again after puppet mode")
+	check(_frozen() != after, "the world moves again after puppet mode")
+
+
+## The whole game state minus the clock (which a guest ticks on its own).
+func _frozen() -> PackedByteArray:
+	var g: Dictionary = Game.to_dict().duplicate(true)
+	g.erase("time_of_day")
+	return var_to_bytes([g, main.world.to_dict()])
 
 
 const GUEST := "guest000000000ff"

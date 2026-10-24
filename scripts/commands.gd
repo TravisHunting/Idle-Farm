@@ -20,8 +20,12 @@ var swarm: Swarm
 var tides: Tides
 
 
-## Run (or later: send) a command from the local player. True if it was applied.
+## Run a command from the local player (a guest sends it to the host instead). True if it was
+## applied (for a guest: sent; the host may still refuse it).
 func submit(cmd: Dictionary) -> bool:
+	if Net.is_guest():
+		Net.send_command(cmd)
+		return true
 	return execute(Game.my_pid, cmd)
 
 

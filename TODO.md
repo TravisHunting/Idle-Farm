@@ -92,6 +92,7 @@ changed drastically and lose territory). Four factions compete for the 12x22 far
   in-game days and a save/reload, prints a faction report every 12 in-game hours and exits
   non-zero on failure (~25s per 8 days). After adding a new `class_name` script, run
   `--headless --path . --import` once to refresh the global class cache.
+- **Multiplayer test:** `bash tests/run_net_test.sh` runs a headless host + guest on localhost (~45s).
 - MCP testing tip: `game_manage input_mouse` positions are in *window* pixels (2x the 192x432
   canvas in the editor's embedded view).
 - Export: see "Exporting" below.
@@ -105,6 +106,7 @@ changed drastically and lose territory). Four factions compete for the 12x22 far
 | `scripts/game.gd` (autoload **Game**) | Global state: coins, level, clock/day, weather, hand of cards + drip timer, weirdness, relics, unlocked crops, favoured crop, pending (delayed) effects, buffs, farmer stats, inventory, log; data tables CROPS, STRUCTS, RELICS; slot paths + settings file. |
 | `scripts/deck.gd` (class **Deck**) | **The card content** (70 cards, pure data). Its header documents every requirement and effect keyword. Add new cards here. |
 | `scripts/commands.gd` (class **Commands**) | Every player action as a command (`submit` / `execute(pid, cmd)`): play a card, move a card, card cadence, speed, debug keys. Validates everything (multiplayer, see `MULTIPLAYER.md`). |
+| `scripts/net.gd` (autoload **Net**) | Two-player networking over ENet: host/join, handshake, guest commands -> host, state snapshots + actor deltas + one-shot effects -> guest (puppet mode). See `MULTIPLAYER.md`. |
 | `scripts/cards.gd` | **Card engine**: weighted drawing (rarity, level, weirdness, `needs`), requirement checks with progress text, auto-costs, effect interpreter (`apply`), gamble/delay, relic gain/loss + passives (daily/dawn/night hooks), companion actors. |
 | `scripts/welcome.gd` | Welcome screen: how-to-play page, then 3 save slots with summaries + delete. |
 | `scripts/main.gd` | Welcome -> slot -> builds the game tree in code (under GameRoot; torn down on menu), window docking (centred right with padding), per-slot save/load + offline progress, debug keys. |
@@ -279,7 +281,8 @@ Key systems added in v0.3:
 - [ ] Multiplayer: host-authoritative ENet + UPnP, join by IP, per-player card boxes, both keep a
   copy when someone leaves. **Full plan, decisions and task checklist: `MULTIPLAYER.md`.**
   - [x] Phase 0: player ids + profiles, per-player hands, command layer, actor ids, world ids, puppet mode
-  - [ ] Phase 1-5: networking, leaving/forking, UPnP, UI, two-machine tests
+  - [x] Phase 1: ENet net core (`net.gd`): handshake, commands, snapshots, actor stream, effects
+  - [ ] Phase 2-5: leaving/forking, UPnP, UI, two-machine tests
 
 ## Next up / ideas (not started)
 - [ ] Balance pass on the deck (reward sizes vs. level scaling; how fast weirdness climbs)
@@ -312,6 +315,10 @@ Key systems added in v0.3:
   variable an explicit type instead of `:=`.
 
 ## Changelog
+- 2026-10-24 - v0.7 phase 1: `scripts/net.gd` (autoload Net): ENet host/join with ZSTD, hello/reject
+  handshake, guest commands over RPC, 1/s state snapshots (when changed), 5/s actor deltas with
+  interpolation, replayed one-shot effects, guest clock smoothing; `main.start_guest`; two-copy test
+  `tests/run_net_test.sh` (6 KB/s on the wire with 21 actors).
 - 2026-10-24 - v0.7 phase 0 (multiplayer prep, single player unchanged): `Game.hands` per player
   (save v4 migrates old saves), `scripts/commands.gd` command layer (HUD + debug keys go through it),
   stable actor `uid`s, `world_id`/`fork()`, `Game.puppet` gate on every sim loop, `-- profile=N` for two
