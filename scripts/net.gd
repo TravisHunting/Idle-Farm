@@ -312,6 +312,7 @@ func _hello(info: Dictionary) -> void:
 	if nm != "":
 		h["name"] = nm
 	Game.present[pid] = true
+	main.world.ensure_friend(pid)   # their own farmer, hut and mailbox
 	_sent = {}
 	_fx = []
 	_key_t = 0.0
@@ -336,7 +337,7 @@ func _cmd(cmd: Dictionary) -> void:
 		return
 	if main.commands.execute(guest_pid, cmd):
 		_state_now = true
-	else:
+	elif String(cmd.get("type", "")) != "poke":   # a missed click needs no telling off
 		var why := "That card can't be played right now." if String(cmd.get("type", "")) == "choose" else "Only the host can change that."
 		_refused.rpc_id(id, why)
 
@@ -397,6 +398,8 @@ func _actors_packet(full: bool) -> Array:
 	var entries: Array = []
 	var here := {}
 	var actors: Array = [world.farmer] if world.farmer else []
+	if world.friend:
+		actors.append(world.friend)
 	actors.append_array(world.animals)
 	for a in actors:
 		var fields: Array = a.net_fields()
@@ -416,7 +419,8 @@ func _actors_packet(full: bool) -> Array:
 		here[a.uid] = true
 		if not delta.is_empty():
 			var caste: String = a.caste if (a is Alien or a is Insect) else ""
-			entries.append([a.uid, "farmer" if a == world.farmer else a.kind, caste, delta])
+			var kind: String = "farmer" if a == world.farmer else ("friend" if a == world.friend else a.kind)
+			entries.append([a.uid, kind, caste, delta])
 	var gone: Array = []
 	for u in _sent.keys():
 		if not here.has(u):
@@ -564,9 +568,14 @@ func _actors(b: PackedByteArray) -> void:
 		var uid := int(e[0])
 		var kind := String(e[1])
 		var delta: Dictionary = e[3]
-		var a: Variant = world.farmer if kind == "farmer" else by_uid.get(uid)
+		var a: Variant = world.farmer if kind == "farmer" else (world.friend if kind == "friend" else by_uid.get(uid))
 		var fresh := false
-		if a == null:
+		if a == null and kind == "friend":
+			world.friend = Farmer.new(world)
+			world.friend.friend = true
+			a = world.friend
+			fresh = true
+		elif a == null:
 			var at: Vector2 = delta.get(0, Vector2(-40, -40))
 			if kind == "alien":
 				a = Alien.new(world, String(e[2]), at)
@@ -591,6 +600,8 @@ func _actors(b: PackedByteArray) -> void:
 		var g: Variant = by_uid.get(int(u))
 		if g:
 			world.animals.erase(g)
+		elif world.friend and world.friend.uid == int(u):
+			world.friend = null
 	for f in p[2]:
 		_replay(String(f[0]), f[1])
 

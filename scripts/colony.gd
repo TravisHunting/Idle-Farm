@@ -199,9 +199,9 @@ func power() -> float:
 	return p + building_count() * 4.0 + land_size() * 0.4 + float(Game.colony["food"]) * 0.05
 
 
-## The farmhouse and its doorstep always stay the farmer's.
+## The farmhouse (and a visitor's hut) and their doorsteps always stay the farmers'.
 func protected(c: Vector2i) -> bool:
-	return world.is_house(c) or c == world.DOOR or c == world.BIN or c == world.BIN_FRONT \
+	return world.is_house(c) or world.is_doorstep(c) or c == world.BIN or c == world.BIN_FRONT \
 		or Vector2(c).distance_to(Vector2(world.DOOR)) < 3.6 or Vector2(c).distance_to(Vector2(world.BIN)) < 2.3
 
 

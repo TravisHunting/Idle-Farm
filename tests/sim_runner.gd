@@ -6,6 +6,8 @@ extends Node
 ##       the aliens, every boon/bane and every insect card choice
 ##   1c. cataclysms: each faction can be wiped out completely, and comes back
 ##   2. a long natural run: the colony + tides left alone for many in-game days, sampled hourly
+##   2b. homes + helping hands: mailboxes, a visiting player's farmer and hut, crop pictures,
+##       clicking overgrowth away, grandpa's chores
 ##   3. a save -> reload round trip
 ## Run (from the project folder):
 ##   C:/Dev/Godot/Godot_v4.7.2-stable_win64.exe --headless --path . -s tests/sim_test.gd -- days=8
@@ -42,6 +44,7 @@ func _run() -> void:
 	Game.log_added.connect(_on_log)
 	print("== farm: %s (%s), quirk %s" % [Game.farm_name, main.world.biome, Game.quirk])
 
+	_test_homes_and_help()
 	_test_arrivals()
 	_test_cards()
 	_test_swings()
@@ -73,6 +76,7 @@ func step(seconds: float) -> void:
 		main.colony._process(STEP)
 		main.swarm._process(STEP)
 		main.tides._process(STEP)
+		main.chores._process(STEP)
 
 
 func check(ok: bool, what: String) -> void:
@@ -570,6 +574,114 @@ func _test_multiplayer_prep() -> void:
 	check(_frozen() != after, "the world moves again after puppet mode")
 
 
+## Mailboxes, the visiting player's farmer + hut, crop pictures, click-to-clear, grandpa's chores.
+func _test_homes_and_help() -> void:
+	print("== homes, crop pictures, helping hands (on the fresh farm)")
+	var w: World = main.world
+	var cmd: Commands = main.commands
+	var me := Game.my_pid
+	var mine := false
+	for c in w.cells_with_obj(["mailbox"]):
+		mine = mine or String(w.objs[c].get("pid", "")) == w.farmer.pid
+	check(mine and w.farmer.pid == Game.owner_pid, "the farmhouse has a mailbox for its player")
+	# grandpa's letter
+	check(Game.chores.has("done"), "a new farm comes with grandpa's letter")
+	check(cmd.execute(me, {"type": "read_letter"}) and not Chores.unread(me), "reading the letter clears the !")
+	# clicking overgrowth away
+	var free: Array = w.free_grass_cells()
+	free.shuffle()
+	var wc: Vector2i = free[0]
+	var rc: Vector2i = free[1]
+	w.place_obj(wc, "weed")
+	w.place_obj(rc, "rock")
+	var pulled := int(Game.stats.get("pulled", 0))
+	check(cmd.execute(me, {"type": "poke", "x": wc.x, "y": wc.y}) and w.obj_type(wc) == "", "one click pulls a weed")
+	check(int(Game.stats.get("pulled", 0)) == pulled + 1, "pulled weeds are counted")
+	var stone := Game.item_count("stone")
+	for i in 3:
+		cmd._poke_ms.clear()   # the test clicks faster than a person can
+		cmd.execute(me, {"type": "poke", "x": rc.x, "y": rc.y})
+	check(w.obj_type(rc) == "" and Game.item_count("stone") > stone, "three clicks smash a rock for stone")
+	check(not cmd.execute(me, {"type": "poke", "x": 99, "y": 2}), "a click off the farm is ignored")
+	cmd._poke_ms.clear()
+	check(not cmd.execute(me, {"type": "poke", "x": w.DOOR.x, "y": w.DOOR.y}), "a click on bare ground does nothing")
+	# a chore done mails a card
+	Game.stats["pulled"] = 5
+	var seen := 0
+	for k in Game.seen:
+		seen += int(Game.seen[k])
+	step(2.0)
+	var seen2 := 0
+	for k in Game.seen:
+		seen2 += int(Game.seen[k])
+	check(Game.chores["done"].has("pull") and seen2 > seen, "a finished chore mails a card")
+	check(Chores.unread(me), "a finished chore puts a ! on the mailbox")
+	# a visiting player: their own farmer, hut and mailbox
+	Game.present[GUEST] = true
+	w.ensure_friend(GUEST)
+	var hut := w.cells_with_obj(["hut"])
+	check(w.friend != null and w.friend.pid == GUEST and w.friend.friend, "a visiting player gets a farmer of their own")
+	check(hut.size() == 1 and String(w.objs[hut[0]].get("pid", "")) == GUEST, "the visitor gets a hut")
+	var theirs := false
+	for c in w.cells_with_obj(["mailbox"]):
+		theirs = theirs or String(w.objs[c].get("pid", "")) == GUEST
+	check(theirs, "the visitor gets a mailbox")
+	if hut.size() == 1:
+		check(w.is_solid(hut[0]) and w.is_walkable(hut[0] + Vector2i(0, 1)), "the hut is solid, its doorstep free")
+		check(w.find_path(w.DOOR, w.friend.door()) != null, "the hut's door can be reached from the farmhouse")
+	var uids := {w.farmer.uid: true, w.friend.uid: true}
+	check(uids.size() == 2, "the two farmers have different ids")
+	var hp := Game.health
+	w.friend.hurt(30, "a test")
+	check(Game.health == hp and w.friend.state != "fainted", "the visitor's farmer never touches the shared stats")
+	var acts := {}
+	for i in 40:
+		step(2.0)
+		acts[w.friend.activity] = true
+	check(acts.size() >= 2, "the visitor's farmer gets to work (%s)" % ", ".join(acts.keys()))
+	Game.present.erase(GUEST)
+	step(1.0)
+	check(w.friend.state == "away" and w.friend.hidden, "the visitor's farmer goes home when they leave")
+	step(10.0)
+	check(w.friend.state == "away", "and stays home while they're away")
+	Game.present[GUEST] = true
+	w.ensure_friend(GUEST)
+	step(2.0)
+	check(not w.friend.hidden and w.cells_with_obj(["hut"]).size() == 1, "a returning visitor finds the same hut")
+	Game.present.erase(GUEST)
+	step(1.0)
+	# crop pictures
+	var f: Dictionary = w.plan_pattern("heart", true)
+	check(not f.is_empty() and f.has("paint") and f["cells"].size() == 11, "the farmer can plan a heart crop picture")
+	if not f.is_empty():
+		var kinds := {}
+		for c in f["cells"]:
+			kinds[w.pattern_crop(c)] = true
+		check(not kinds.has("") and w.farmer._pick_crop(f["cells"][0]) == w.pattern_crop(f["cells"][0]),
+			"every tile of the picture has its crop, and the farmer plants it")
+		var shows := int(Game.stats.get("patterns", 0))
+		for c in f["cells"]:
+			w.objs.erase(c)
+			w.set_tilled(c, true)
+			w.plant(c, w.pattern_crop(c))
+			w.crops[c]["growth"] = 0.4
+		step(4.0)
+		check(int(Game.stats.get("patterns", 0)) == shows + 1 and f.get("bloom", false), "a sprouted picture is celebrated")
+		step(4.0)
+		check(int(Game.stats.get("patterns", 0)) == shows + 1, "only once per planting")
+	var nf := w.fields.size()
+	main.director.run_event("inspiration")
+	check(w.fields.size() == nf + 1 and w.fields[-1].has("paint"), "inspiration strikes: a crop picture is planned")
+
+
+func _pictures() -> int:
+	var n := 0
+	for f in main.world.fields:
+		if f.has("paint") and not (f["paint"] as Dictionary).is_empty():
+			n += 1
+	return n
+
+
 ## The whole game state minus the clock (which a guest ticks on its own).
 func _frozen() -> PackedByteArray:
 	var g: Dictionary = Game.to_dict().duplicate(true)
@@ -600,6 +712,7 @@ func _test_save_roundtrip() -> void:
 	if not main.swarm.active():
 		main.swarm.arrive("hive")
 		step(120.0)
+	var art_n := _pictures()
 	var nb := bugs().size()
 	var tun: int = main.world.insect_land.size()
 	var mnd: int = main.swarm.mounds().size()
@@ -624,6 +737,9 @@ func _test_save_roundtrip() -> void:
 	check(Game.world_id == wid and Game.owner_pid == Game.my_pid, "the world id and owner survive a reload")
 	check(guest_stash != "" and Game.card_at("stash", 1, GUEST) == guest_stash, "the guest's hand survives a reload")
 	check(main.world.farmer.uid == fuid, "the farmer's id survives a reload")
+	var fr: Farmer = main.world.friend
+	check(fr != null and fr.pid == GUEST and fr.state == "away" and fr.home.x >= 0, "the visitor's farmer and hut survive a reload")
+	check(_pictures() == art_n, "crop pictures survive a reload (%d)" % art_n)
 	var kept := 0
 	for a in main.world.animals:
 		if auids.has(a.uid):

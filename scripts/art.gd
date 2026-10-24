@@ -1156,6 +1156,13 @@ func _ready() -> void:
 	var insect: Dictionary = insect_art.SPRITES.merged(insect_art.variants(SPRITES))
 	for key in insect:
 		_tex[key] = _from_ascii(insect[key])
+	# the visiting player's farmer: same frames, other clothes (tan hat, blue band, green overalls)
+	for f in ["idle", "walk1", "walk2", "work"]:
+		var rows: Array = []
+		for r: String in SPRITES["farmer_" + f]:
+			rows.append(r.replace("8", "D").replace("j", "i").replace("d", "m").replace("D", "d"))
+		_tex["friend_" + f] = _from_ascii(rows)
+	_tex.merge(_homes(), true)
 	_tex["ufo"] = _tex["saucer"]   # the landed saucer of the "Lights in the Sky" mystery
 	_tex["pine"] = _paint_pine()
 	_tex["gear"] = _from_ascii([".7.7.7.", "7777777", ".77.77.", "777.777", ".77.77.", "7777777", ".7.7.7."])
@@ -1169,6 +1176,56 @@ func _ready() -> void:
 	var m := Image.create(8, 8, false, Image.FORMAT_RGBA8)
 	m.fill(Color.MAGENTA)
 	_missing = ImageTexture.create_from_image(m)
+
+
+## A visiting player's hut (16x22, door at the bottom) and the mailboxes (flag down / up).
+func _homes() -> Dictionary:
+	var hut := [
+		"......4444......",
+		".....4hhhh4.....",
+		"....4hh44hh4....",
+		"...4hh4ii4hh4...",
+		"..4hh4iiii4hh4..",
+		".4hh4iiiiii4hh4.",
+		"4hh4iiiiiiii4hh4",
+		"4444iiiiiiii4444",
+		"..4iiiiiiiiiii4.",
+		"..4i777iiiiiii4.",
+		"..4i7c7ihhhhii4.",
+		"..4i777ih44hii4.",
+		"..4iiiiih44hii4.",
+		"..4i4i4ih44hi44.",
+		"..4iiiiih4ahii4.",
+		"..4i4i4ih44hii4.",
+		"..4iiiiih44hii4.",
+		"..44444444444444",
+		"....55....55....",
+	]
+	var box := [
+		"................",
+		"................",
+		"................",
+		"................",
+		"......8888......",
+		".....888888.....",
+		".....877778.....",
+		".....888888.....",
+		".......4........",
+		".......4........",
+		".......4........",
+		".......4........",
+		".......4........",
+		"......444.......",
+		"................",
+		"................",
+	]
+	var up := box.duplicate()
+	up[1] = "..........aa...."
+	up[2] = "..........aaa..."
+	up[3] = "..........a....."
+	up[4] = "......8888a....."
+	up[5] = ".....888888....."
+	return {"hut": _from_ascii(hut), "mailbox": _from_ascii(box), "mailbox_flag": _from_ascii(up)}
 
 
 func tex(name: String) -> Texture2D:

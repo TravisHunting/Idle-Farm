@@ -46,6 +46,7 @@ var open_where := ""
 var open_i := -1
 var settings_open := false
 var panel_open := false
+var letter_open := false      # grandpa's letter (click a mailbox), see chores.gd
 var dragging := false         # window drag
 var drag_off := Vector2i.ZERO
 var press_slot := []          # slot pressed (click or card drag)
@@ -209,6 +210,7 @@ func _press(p: Vector2) -> void:
 				settings_open = not settings_open
 				_close_modal()
 				panel_open = false
+				letter_open = false
 			"dock": main.toggle_dock()
 			"min": main.minimize()
 			"close": main.save_and_quit()
@@ -246,12 +248,38 @@ func _press(p: Vector2) -> void:
 		return
 	if p.y >= FARM_Y and p.y < STATUS_Y:
 		var wp := p - Vector2(0, FARM_Y)
+		if letter_open:
+			letter_open = false
+			return
 		var f := world.farmer
+		var fr := world.friend
 		if f and f.visible_outside() and f.pos.distance_to(wp + Vector2(0, 6)) < 12.0:
 			f.on_click()
 			panel_open = not panel_open
-		else:
+		elif fr and fr.visible_outside() and fr.pos.distance_to(wp + Vector2(0, 6)) < 12.0:
+			fr.on_click()
 			panel_open = false
+		elif panel_open:
+			panel_open = false
+		elif world.obj_type(world.cell_of(wp)) == "mailbox":
+			letter_open = true
+			commands.submit({"type": "read_letter"})
+		else:
+			var c := _poke_cell(wp)
+			if c.x >= 0:
+				commands.submit({"type": "poke", "x": c.x, "y": c.y})
+
+
+## The overgrowth a click at wp (farm pixels) would pull: the tile under it, or a tall thing
+## (tree, boulder...) standing on the tile below. (-1, -1) if none.
+func _poke_cell(wp: Vector2) -> Vector2i:
+	var c := world.cell_of(wp)
+	if World.TAPS.has(world.obj_type(c)):
+		return c
+	var below := c + Vector2i(0, 1)
+	if world.in_bounds(below) and world.obj_type(below) in ["tree", "pine", "boulder", "bush", "bramble"]:
+		return below
+	return Vector2i(-1, -1)
 
 
 func _release(p: Vector2) -> void:
@@ -414,6 +442,8 @@ func _draw() -> void:
 	_draw_world_overlays()
 	if panel_open:
 		_draw_farmer_panel()
+	if letter_open:
+		_draw_letter()
 	if open_id != "":
 		_draw_modal()
 	if settings_open:
@@ -439,12 +469,13 @@ func _draw_toast() -> void:
 func _draw_world_overlays() -> void:
 	if world == null:
 		return
-	var f := world.farmer
-	if f and f.bubble_t > 0.0 and f.bubble != "":
-		var anchor := f.pos
-		if f.hidden:
-			anchor = world.house_px() + Vector2(16, 6)
-		_bubble(f.bubble, anchor + Vector2(0, FARM_Y - 18))
+	_draw_hover_cell()
+	for f: Farmer in [world.farmer, world.friend]:
+		if f and f.bubble_t > 0.0 and f.bubble != "":
+			var anchor := f.pos
+			if f.hidden:
+				anchor = f.home_px() + Vector2(-6, 2)
+			_bubble(f.bubble, anchor + Vector2(0, FARM_Y - 18))
 	for a in world.animals:
 		if a.bubble_t > 0.0 and not a.dead:
 			_bubble(a.bubble, a.pos + Vector2(0, FARM_Y - 18))
@@ -454,6 +485,22 @@ func _draw_world_overlays() -> void:
 		var p: Vector2 = fl["p"] + Vector2(0, FARM_Y)
 		if p.y > FARM_Y and p.y < STATUS_Y - 5:
 			Art.draw_text(self, fl["text"], p, c, Color(0, 0, 0, c.a * 0.7))
+
+
+## Outlines what a click on the farm would do: pull this weed / smash this rock, or read the mail.
+func _draw_hover_cell() -> void:
+	if panel_open or letter_open or settings_open or open_id != "" or mouse.y < FARM_Y or mouse.y >= STATUS_Y:
+		return
+	var wp := mouse - Vector2(0, FARM_Y)
+	var c := world.cell_of(wp)
+	var col := Color(1, 0.8, 0.46, 0.8)
+	if world.obj_type(c) != "mailbox":
+		c = _poke_cell(wp)
+		col = Color(1, 1, 1, 0.45)
+	if c.x < 0:
+		return
+	var r := Rect2(Vector2(c * 16) + Vector2(0, FARM_Y), Vector2(16, 16))
+	draw_rect(r, col, false, 1.0)
 
 
 func _bubble(text: String, bottom_center: Vector2) -> void:
@@ -656,6 +703,39 @@ func _draw_farmer_panel() -> void:
 	y += 11
 	_draw_faction_lines(x, y)
 	_txt("CLICK THE FARM TO CLOSE", Vector2(x, PANEL.end.y - 9), C_DIM)
+
+
+## Grandpa's letter: the starter chores (chores.gd), ticked off as they get done.
+func _draw_letter() -> void:
+	var paper := Color("e8dcc0")
+	var ink := Color("3b2a20")
+	_frame(PANEL.grow(1), C_BG, C_BG)
+	_frame(PANEL, C_WOOD, paper)
+	var x := PANEL.position.x + 6
+	var y := PANEL.position.y + 5
+	Art.draw_text(self, "A LETTER FROM GRANDPA", Vector2(x, y), Color("8b3a3a"))
+	y += 9
+	for l in Art.wrap(Chores.LETTER.to_upper(), 42):
+		Art.draw_text(self, l, Vector2(x, y), ink)
+		y += 7
+	y += 4
+	for ch in Chores.LIST:
+		var pr := Chores.progress(ch, world)
+		var done: bool = Game.chores.get("done", {}).has(ch["id"])
+		draw_rect(Rect2(x, y, 5, 5), ink, false, 1.0)
+		if done:
+			draw_rect(Rect2(x + 1, y + 1, 3, 3), Color("38b764"))
+		var c := Color("6a6050") if done else ink
+		Art.draw_text(self, String(ch["text"]).to_upper(), Vector2(x + 8, y), c)
+		var prog := "%d/%d" % [pr[0], pr[1]] if not ch.has("cleared") else "%d%%" % pr[0]
+		Art.draw_text(self, "DONE" if done else prog, Vector2(PANEL.end.x - 6 - Art.text_width("DONE" if done else prog), y),
+			Color("38b764") if done else Color("8b5a3c"))
+		y += 9
+	y += 3
+	Art.draw_text(self, "EACH CHORE DONE: A CARD IN THE MAIL", Vector2(x, y), Color("8b5a3c"))
+	y += 7
+	Art.draw_text(self, "TIP: CLICK WEEDS AND ROCKS TO HELP", Vector2(x, y), Color("8b5a3c"))
+	Art.draw_text(self, "CLICK THE FARM TO CLOSE", Vector2(x, PANEL.end.y - 9), Color("6a6050"))
 
 
 ## The aliens next door, what they did to the farmer, and who the tides favour.

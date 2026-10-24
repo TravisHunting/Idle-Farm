@@ -16,6 +16,7 @@ var colony: Colony
 var swarm: Swarm
 var tides: Tides
 var commands: Commands
+var chores: Chores
 var hud: Control
 var farm_view: Control
 var weather_fx: Node2D
@@ -95,6 +96,8 @@ func start_slot(n: int) -> void:
 		var intro := {"woodland": "The trees have taken over.", "rocky": "Rocks. So many rocks.",
 			"brambles": "Brambles everywhere!", "meadow": "The grass is waist-high.", "marsh": "Squelchy, muddy, froggy."}
 		Game.add_log("Day 1 at %s. %s" % [Game.farm_name, intro.get(world.biome, "")])
+		Chores.start()
+		Game.add_log("There's a letter from grandpa in the mailbox. Click it!")
 		world.farmer.say(["Grandpa really let this place go...", "My very own (overgrown) farm!",
 			"Right. Where do I even start?"].pick_random(), 5.0)
 		# two cards to start with, so there's something to decide straight away
@@ -199,7 +202,13 @@ func _build() -> void:
 	commands.colony = colony
 	commands.swarm = swarm
 	commands.tides = tides
+	commands.world = world
 	_game_root.add_child(commands)
+	chores = Chores.new()
+	chores.name = "Chores"
+	chores.world = world
+	chores.cards = cards
+	_game_root.add_child(chores)
 
 	var layer := CanvasLayer.new()
 	layer.layer = 1
@@ -326,6 +335,7 @@ func load_game() -> bool:
 	var d: Dictionary = parsed
 	Game.from_dict(d.get("game", {}))
 	world.from_dict(d.get("world", {}))
+	world.ensure_homes()   # older saves get their mailbox
 	if Game.owner_pid != Game.my_pid:
 		Game.fork()   # someone else's world, kept from a shared game: it's ours now
 	_offline_progress(Time.get_unix_time_from_system() - float(d.get("time", 0.0)))

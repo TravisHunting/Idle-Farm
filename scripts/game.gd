@@ -264,6 +264,7 @@ var colony := {}         # the alien faction's state (colony.gd)
 var mutations := {}      # id -> true (see MUTATIONS)
 var tides := {}          # faction balance history + timers (tides.gd)
 var brood := {}          # the mutant insects' state (swarm.gd)
+var chores := {}         # grandpa's letter of starter chores (chores.gd)
 var settings := {"dock": "right", "card_minutes": DEFAULT_CARD_MINUTES, "speed": 1}
 var time_scale := 1.0    # game speed (fast forward), from settings["speed"]
 var profile := ""        # "" or "_p2".. (`-- profile=N`): separate settings + slots, for two copies on one PC
@@ -312,6 +313,7 @@ func reset() -> void:
 	mutations = {}
 	tides = {}
 	brood = {}
+	chores = {}
 
 
 func _process(delta: float) -> void:
@@ -784,7 +786,7 @@ func to_dict() -> Dictionary:
 		"mood": mood, "poison": poison, "stats": stats, "log": log_lines, "weird": weird,
 		"relics": relics, "unlocked": unlocked, "favor_crop": favor_crop, "pending": pending,
 		"seen": seen, "play_seconds": play_seconds,
-		"colony": colony, "mutations": mutations, "tides": tides, "brood": brood,
+		"colony": colony, "mutations": mutations, "tides": tides, "brood": brood, "chores": chores,
 		"world_id": world_id, "forked_from": forked_from,
 	}
 
@@ -808,6 +810,7 @@ func from_dict(d: Dictionary) -> void:
 	mutations = d.get("mutations", {})
 	tides = d.get("tides", {})
 	brood = d.get("brood", {})
+	chores = d.get("chores", {})
 	day = int(d.get("day", day))
 	time_of_day = float(d.get("time_of_day", time_of_day))
 	weather = String(d.get("weather", weather))

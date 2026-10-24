@@ -13,6 +13,8 @@ func _draw() -> void:
 		items.append([c.y * 16 + 15.0, "obj", c])
 	if world.farmer:
 		items.append([world.farmer.pos.y, "farmer", world.farmer])
+	if world.friend:
+		items.append([world.friend.pos.y, "farmer", world.friend])
 	for a in world.animals:
 		var y: float = a.pos.y
 		if a.kind in ["crow", "butterfly", "bee"]:
@@ -55,6 +57,10 @@ func _draw_obj(c: Vector2i) -> void:
 		var r := 9.0 if t == "a_spire" else 6.0
 		draw_circle(world.center(c) + Vector2(0, -4), r, Color(0.45, 1.0, 0.8, 0.10 * Game.darkness()))
 	_draw_sprite(c, _tex_name(o), mod)
+	if t == "mailbox" and String(o.get("pid", "")) == Game.my_pid and Chores.unread(Game.my_pid):
+		# a letter from grandpa (news about the chores) waiting: a bobbing "!"
+		var bob := floorf(sin(world._anim_t * 5.0) * 1.5)
+		Art.draw_text(self, "!", Vector2(c.x * 16 + 7, c.y * 16 - 4 + bob), Color("ffcd75"), Color(0, 0, 0, 0.7))
 
 
 ## Fences join up with their neighbours: a post per tile, rails towards adjacent fences.
@@ -93,6 +99,12 @@ func _tex_name(o: Dictionary) -> String:
 		return "a_moss" if float(o.get("g", 0.0)) >= 1.0 else "a_moss_young"
 	if t == "i_mound":
 		return "i_mound%d" % clampi(int(o.get("stage", 1)), 1, 3)
+	if t == "mailbox":
+		# flag up while that player has cards waiting in their box
+		var h: Dictionary = Game.hands.get(String(o.get("pid", "")), {})
+		for id in h.get("box", []):
+			if id != "":
+				return "mailbox_flag"
 	return t
 
 

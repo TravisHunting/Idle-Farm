@@ -9,6 +9,8 @@ extends Node
 ##   card_minutes {n}                                          card cadence (a world rule: owner only)
 ##   speed       {n}                                           game speed (owner only)
 ##   debug       {key}                                         debug actions (owner only, debug builds)
+##   poke        {x, y}                                        clear overgrowth on a tile by hand (a click)
+##   read_letter {}                                            this player read grandpa's letter (chores.gd)
 
 ## Debug commands -> what they do (the keys live in main._unhandled_input).
 const DEBUG := ["draw", "fill", "event", "next_card", "weird", "alien", "tides", "brood", "locusts", "cataclysm"]
@@ -18,6 +20,8 @@ var director: Node
 var colony: Colony
 var swarm: Swarm
 var tides: Tides
+var world: World
+var _poke_ms := {}   # pid -> last poke (ms): a click can't be faster than a person clicks
 
 
 ## Run a command from the local player (a guest sends it to the host instead). True if it was
@@ -62,6 +66,16 @@ func execute(pid: String, cmd: Dictionary) -> bool:
 				return false
 			Game.set_speed(sp)
 			Game.add_log("Game speed x%d" % sp)
+			return true
+		"poke":
+			var c := Vector2i(_int(cmd.get("x")), _int(cmd.get("y")))
+			var now := Time.get_ticks_msec()
+			if world == null or not world.in_bounds(c) or now - int(_poke_ms.get(pid, -1000)) < 80:
+				return false
+			_poke_ms[pid] = now
+			return world.poke(c)
+		"read_letter":
+			Chores.mark_read(pid)
 			return true
 		"debug":
 			if not owner or not OS.is_debug_build():

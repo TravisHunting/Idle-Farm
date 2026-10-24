@@ -6,7 +6,10 @@ class_name Farmer
 ##   nap                     = passed out from exhaustion on the spot (vulnerable)
 ##   fainted                 = health hit 0; costs a doctor's bill
 ##   abducted                = taken up by an alien saucer; comes back changed (colony.gd)
+##   away                    = (friend only) their player isn't here: at home in the hut
 ## Stats (health/energy/mood/poison) live in Game so they persist.
+## In multiplayer the visiting player has a second farmer (`friend`, World.friend) with a hut of
+## his own: same brain, different clothes; he never touches the shared stats and never faints.
 
 const SPEED := 26.0
 
@@ -48,9 +51,13 @@ const LINES := {
 	"honey": ["Sweet! Thanks, big fellas.", "Honey for the chest... er, the pantry.", "Good bugs. GOOD bugs."],
 	"smoke": ["Out! Out of my farm!", "Smoke 'em out!", "No more tunnels under MY turnips!"],
 	"abducted_back": ["I've seen things...", "They probed my turnips.", "The stars! The STARS!", "How long was I gone?"],
+	"plan_pattern": ["I've got a vision: a %s!", "Crop art time! A %s.", "They'll see this %s from the sky!"],
 }
 
 var world  # World
+var pid := ""            # the player this farmer belongs to (the farmhouse's: the world's first owner)
+var friend := false      # the visiting player's farmer: lives in the hut at `home`
+var home := Vector2i(-1, -1)
 var uid := 0      # stable actor id (World.new_uid), used to match actors across the network
 var net_to := Vector2.INF   # on a guest: where the host says the farmer is
 ## The tool in his hands (only drawn while working); a plain property for Net's actor stream.
@@ -92,6 +99,34 @@ func cell() -> Vector2i:
 	return world.cell_of(pos)
 
 
+## Where he goes in and out: the farmhouse door, or the step in front of his hut.
+func door() -> Vector2i:
+	return home + Vector2i(0, 1) if friend and home.x >= 0 else world.DOOR
+
+
+## The other player's farmer (or null).
+func other() -> Farmer:
+	return world.farmer if friend else world.friend
+
+
+## For log lines: "The farmer", or the visiting player's name.
+func who() -> String:
+	return Game.player_name(pid) if friend else "The farmer"
+
+
+## His player left: home to the hut until they come back.
+func go_away() -> void:
+	if state == "away":
+		return
+	_drop_carry()
+	task = {}
+	path = []
+	hidden = true
+	state = "away"
+	activity = "Gone home"
+	pos = world.feet(door())
+
+
 func say(text: String, dur: float = 3.0) -> void:
 	bubble = text
 	bubble_t = dur
@@ -125,9 +160,13 @@ func update(d: float) -> void:
 	bubble_t -= d
 	hurt_t -= d
 	chatter_t -= d
-	_update_stats(d)
+	if not friend:
+		_update_stats(d)
 	_react_to_weather()
 	match state:
+		"away":
+			_exit_house()
+			say("I'm back!")
 		"fainted":
 			faint_t -= d
 			if faint_t <= 0.0:
@@ -251,6 +290,12 @@ func _react_to_weather() -> void:
 func hurt(amount: int, reason: String) -> void:
 	if state == "fainted":
 		return
+	if friend:
+		# the visitor shrugs it off: the shared stats belong to the farmhouse farmer
+		hurt_t = 0.6
+		say_line("hurt")
+		world.float_text("OUCH", pos + Vector2(-8, -24), Color("b13e53"))
+		return
 	if Game.charms > 0:
 		Game.charms -= 1
 		say_line("lucky")
@@ -273,7 +318,7 @@ func hurt(amount: int, reason: String) -> void:
 
 
 func faint() -> void:
-	if state == "fainted":
+	if state == "fainted" or friend:
 		return
 	_drop_carry()
 	hidden = false
@@ -311,7 +356,7 @@ func _recover() -> void:
 
 ## Beamed up by a saucer for a while (colony.gd).
 func abduct(seconds: float) -> void:
-	if state == "fainted":
+	if state == "fainted" or friend:
 		return
 	_drop_carry()
 	task = {}
@@ -359,11 +404,12 @@ func _drop_carry() -> void:
 
 
 func _exit_house() -> void:
+	var was_in := hidden
 	hidden = false
 	state = "idle"
 	think_t = 0.5
-	if world.is_house(cell()) or task.get("kind", "") in ["sleep", "shelter", "rest_home"]:
-		pos = world.feet(world.DOOR)
+	if world.is_house(cell()) or task.get("kind", "") in ["sleep", "shelter", "rest_home"] or was_in:
+		pos = world.feet(door())
 	task = {}
 
 
@@ -378,20 +424,20 @@ func _choose() -> void:
 		storm_brave_t -= 1.0
 	if Game.weather == "storm" and storm_brave_t <= 0.0:
 		if randf() < 0.65 or Game.health < 50.0:
-			cands.append([300, {"kind": "shelter", "cell": world.DOOR}])
+			cands.append([300, {"kind": "shelter", "cell": door()}])
 		else:
 			storm_brave_t = 25.0
 			say_line("storm_brave")
 	if Game.is_night():
-		cands.append([250, {"kind": "sleep", "cell": world.DOOR}])
+		cands.append([250, {"kind": "sleep", "cell": door()}])
 	if Game.health < 30.0:
-		cands.append([120, {"kind": "sleep", "cell": world.DOOR}])
+		cands.append([120, {"kind": "sleep", "cell": door()}])
 	if Game.energy < 25.0:
 		var benches: Array = world.cells_with_obj(["bench"])
 		if benches.size() > 0:
 			cands.append([100, {"kind": "rest", "cell": benches[0], "adj": true}])
 		else:
-			cands.append([100, {"kind": "rest_home", "cell": world.DOOR}])
+			cands.append([100, {"kind": "rest_home", "cell": door()}])
 	var wells: Array = world.cells_with_obj(["well"])
 	if Game.energy < 55.0 and wells.size() > 0:
 		cands.append([45, {"kind": "drink", "cell": wells[0], "adj": true, "dur": 2.0, "tool": "tool_bucket"}])
@@ -461,7 +507,9 @@ func _choose() -> void:
 		if reach.has(c):
 			tillable.append(c)
 	var tilled_n: int = world.tilled_cells().size()
-	if tillable.size() > 0 and tilled_n < Game.max_tilled():
+	if tilled_n >= Game.max_tilled():
+		tillable = tillable.filter(world.is_pattern)   # crop pictures get finished past the cap
+	if tillable.size() > 0:
 		cands.append([50, {"kind": "till", "cell": world.nearest(tillable, me), "dur": 2.0, "tool": "tool_hoe"}])
 	elif todo[0].size() + todo[1].size() == 0 and tilled_n + 2 <= Game.max_tilled() and world.fields.size() < 12:
 		# a first little field matters more than tidying; after that, expanding is a whim
@@ -480,7 +528,7 @@ func _choose() -> void:
 			target = world.nearest(in_field, me)
 			score = 57.0
 		else:
-			target = world.nearest(debris, world.DOOR if randf() < 0.6 else me)
+			target = world.nearest(debris, door() if randf() < 0.6 else me)
 			# the wilder the farm, the more he wants it gone
 			score = 34.0 + 24.0 * (1.0 - world.cleared_ratio())
 		if Game.quirk == "tidy":
@@ -580,9 +628,14 @@ func _choose() -> void:
 
 	if cands.is_empty():
 		return
+	# two farmers: don't both go for the same tile
+	var mate := other()
+	var taken: Variant = mate.task.get("cell") if mate and not mate.hidden else null
 	var best: Dictionary = {}
 	var best_s := -1e9
 	for cd in cands:
+		if taken != null and cd[1]["cell"] == taken and not cd[1]["kind"] in ["sleep", "shelter", "rest_home", "sell", "drink", "rest"]:
+			continue
 		var s: float = float(cd[0]) + randf() * 14.0
 		if s > best_s:
 			best_s = s
@@ -606,6 +659,9 @@ func _pick_crop(c: Vector2i = Vector2i(-1, -1)) -> String:
 	for id in Game.CROPS:
 		if id != "melon" and Game.crop_unlocked(id):
 			opts.append(id)
+	var art: String = world.pattern_crop(c)
+	if art != "":
+		return art if art in opts else opts.pick_random()
 	if Game.buff("favor") and Game.favor_crop in opts and randf() < 0.75:
 		return Game.favor_crop
 	if Game.quirk == "sunny" and "sunflower" in opts and randf() < 0.6:
@@ -799,7 +855,7 @@ func _walk(d: float) -> void:
 	if _step_towards(world.feet(next), d):
 		path.pop_front()
 		for a in world.animals:
-			if a.kind == "snake" and not a.dead and world.cell_of(a.pos) == next and not Game.has_mutation("compound_eyes"):
+			if a.kind == "snake" and not a.dead and world.cell_of(a.pos) == next and not Game.has_mutation("compound_eyes") and not friend:
 				a.bite_farmer()
 
 
@@ -824,7 +880,7 @@ func _arrive() -> void:
 		"sleep":
 			hidden = true
 			state = "sleep"
-			Game.add_log("The farmer went to bed.")
+			Game.add_log("%s went to bed." % who())
 		"shelter":
 			hidden = true
 			state = "inside"
@@ -893,14 +949,28 @@ func _finish() -> void:
 				world.set_tilled(c, true)
 				world.puff(world.center(c), Color("8b5a3c"), 8)
 		"plan":
-			var f: Dictionary = world.plan_field()
+			var art := 0
+			for fl in world.fields:
+				if fl.has("paint"):
+					art += 1
+			# now and then a crop picture instead of a plain field
+			var f: Dictionary = {}
+			if art < 2 and randf() < (0.5 if Game.quirk == "artsy" else 0.28):
+				f = world.plan_pattern()
 			if not f.is_empty():
+				say(LINES["plan_pattern"].pick_random().replace("%s", f["shape"]), 3.5)
+				Game.add_log("%s marked out a %s crop picture." % [who(), f["shape"]])
+				for cc in f["cells"]:
+					world.puff(world.center(cc), Color("e0c08a"), 2, 6.0)
+			else:
+				f = world.plan_field()
+			if not f.is_empty() and not f.has("paint"):
 				var shape: String = String(f["shape"]).replace("_", " ")
 				if f["shape"] in World.SILLY:
 					say(LINES["plan_silly"].pick_random().replace("%s", shape), 3.5)
 				else:
 					say(LINES["plan"].pick_random().replace("%s", shape), 3.0)
-				Game.add_log("The farmer marked out a %s-shaped field." % shape)
+				Game.add_log("%s marked out a %s-shaped field." % [who(), shape])
 				for cc in f["cells"]:
 					world.puff(world.center(cc), Color("e0c08a"), 2, 6.0)
 		"pave":
@@ -914,6 +984,7 @@ func _finish() -> void:
 				var crop: String = task["crop"]
 				world.plant(c, crop)
 				world.puff(world.center(c), Color("5a3626"), 4, 10.0)
+				Game.bump("planted")
 		"water":
 			if world.is_tilled(c):
 				world.wet[world.idx(c)] = 1.0
@@ -1075,18 +1146,19 @@ func draw(ci: CanvasItem) -> void:
 		if state == "sleep" or state == "rest":
 			var z := Art.tex("zzz")
 			var off := Vector2(fmod(anim_t * 4.0, 8.0), -fmod(anim_t * 6.0, 12.0))
-			ci.draw_texture(z, world.house_px() + Vector2(22, 4) + off, Color(1, 1, 1, 0.8))
+			ci.draw_texture(z, home_px() + off, Color(1, 1, 1, 0.8))
 		return
 	# shadow
 	ci.draw_rect(Rect2(pos.x - 5, pos.y, 10, 2), Color(0, 0, 0, 0.25))
 	var mod := Color.WHITE
-	if Game.poison > 0.0:
+	var look := "friend_" if friend else "farmer_"
+	if Game.poison > 0.0 and not friend:
 		mod = Color(0.75, 1.0, 0.7)
 	if hurt_t > 0.0 and int(hurt_t * 20.0) % 2 == 0:
 		mod = Color(1, 0.4, 0.4)
 	if state == "fainted" or state == "nap":
 		ci.draw_set_transform(pos + Vector2(0, -3), PI * 0.5 if flip else -PI * 0.5, Vector2.ONE)
-		ci.draw_texture(Art.tex("farmer_idle"), Vector2(-8, -8), mod)
+		ci.draw_texture(Art.tex(look + "idle"), Vector2(-8, -8), mod)
 		ci.draw_set_transform_matrix(Transform2D.IDENTITY)
 		if state == "nap":
 			ci.draw_texture(Art.tex("zzz"), pos + Vector2(4, -16 - fmod(anim_t * 5.0, 6.0)))
@@ -1095,23 +1167,24 @@ func draw(ci: CanvasItem) -> void:
 				var a := anim_t * 3.0 + i * TAU / 3.0
 				ci.draw_rect(Rect2(pos + Vector2(cos(a) * 6.0 - 0.5, -12 + sin(a) * 2.0), Vector2(1, 1)), Color("ffcd75"))
 		return
-	var frame := "farmer_idle"
+	var frame := look + "idle"
 	var bob := 0.0
 	match state:
 		"walk":
-			frame = "farmer_walk1" if int(anim_t * 6.0) % 2 == 0 else "farmer_walk2"
+			frame = look + ("walk1" if int(anim_t * 6.0) % 2 == 0 else "walk2")
 			bob = -1.0 if int(anim_t * 6.0) % 2 == 0 else 0.0
 		"work":
-			frame = "farmer_work" if int(anim_t * 4.0) % 2 == 0 else "farmer_idle"
+			frame = look + ("work" if int(anim_t * 4.0) % 2 == 0 else "idle")
 		"rest":
 			bob = 2.0
-	if Game.has_mutation("green"):
+	if Game.has_mutation("green") and not friend:
 		mod *= Color(0.72, 1.0, 0.68)
-	if Game.has_mutation("glow") and Game.darkness() > 0.2:
+	if Game.has_mutation("glow") and Game.darkness() > 0.2 and not friend:
 		ci.draw_circle(pos + Vector2(0, -7), 10.0, Color(0.6, 1.0, 0.6, 0.12 * Game.darkness()))
 	ci.draw_set_transform(pos, 0.0, Vector2(-1.0 if flip else 1.0, 1.0))
 	ci.draw_texture(Art.tex(frame), Vector2(-8, -15 + bob), mod)
-	_draw_mutations(ci, bob)
+	if not friend:
+		_draw_mutations(ci, bob)
 	if state == "work" and task.has("tool"):
 		var up := int(anim_t * 4.0) % 2 == 0
 		ci.draw_texture(Art.tex(task["tool"]), Vector2(3, -22 if up else -16))
@@ -1119,6 +1192,13 @@ func draw(ci: CanvasItem) -> void:
 	if carrying != "":
 		var tx := Art.tex(carrying)
 		ci.draw_texture_rect(tx, Rect2(pos.x - 6, pos.y - 30, 12, 12 * tx.get_height() / maxf(1.0, tx.get_width())), false)
+
+
+## Where his snoring shows while he sleeps inside.
+func home_px() -> Vector2:
+	if friend and home.x >= 0:
+		return Vector2(home * 16) + Vector2(10, -10)
+	return world.house_px() + Vector2(22, 4)
 
 
 ## Little extras the aliens left him with (drawn in the farmer's local, flipped space).
@@ -1152,7 +1232,8 @@ func _draw_mutations(ci: CanvasItem, bob: float) -> void:
 
 # ---------------------------------------------------------------- save
 func to_dict() -> Dictionary:
-	return {"uid": uid, "x": pos.x, "y": pos.y, "carrying": carrying, "carry": carry_data,
+	return {"uid": uid, "pid": pid, "home": "%d,%d" % [home.x, home.y], "away": state == "away",
+		"x": pos.x, "y": pos.y, "carrying": carrying, "carry": carry_data,
 		"sleep": state == "sleep", "fainted": state == "fainted", "faint_t": faint_t,
 		"abducted": work_t if state == "abducted" else 0.0}
 
@@ -1161,15 +1242,23 @@ func from_dict(d: Dictionary) -> void:
 	if d.is_empty():
 		return
 	uid = int(d.get("uid", uid))
+	pid = String(d.get("pid", ""))
+	var hm := String(d.get("home", "-1,-1")).split(",")
+	if hm.size() == 2:
+		home = Vector2i(int(hm[0]), int(hm[1]))
 	pos = Vector2(float(d.get("x", pos.x)), float(d.get("y", pos.y)))
 	carrying = String(d.get("carrying", ""))
 	carry_data = d.get("carry", {})
 	if carrying != "":
 		_drop_carry()
-	if bool(d.get("sleep", false)):
+	if bool(d.get("away", false)):
+		hidden = true
+		state = "away"
+		activity = "Gone home"
+	elif bool(d.get("sleep", false)):
 		hidden = true
 		state = "sleep"
-		task = {"kind": "sleep", "cell": world.DOOR}
+		task = {"kind": "sleep", "cell": door()}
 	elif bool(d.get("fainted", false)):
 		state = "fainted"
 		faint_t = float(d.get("faint_t", 20.0))
@@ -1181,7 +1270,8 @@ func from_dict(d: Dictionary) -> void:
 ## What a guest needs to draw this actor (Net's actor stream). Timers in Net.DECAYING also run
 ## down on the guest by themselves.
 func net_fields() -> Array:
-	return ["pos", "state", "flip", "hidden", "bubble", "bubble_t", "carrying", "hurt_t", "activity", "net_tool"]
+	return ["pos", "state", "flip", "hidden", "bubble", "bubble_t", "carrying", "hurt_t", "activity", "net_tool",
+		"pid", "home"]
 
 
 ## A guest's stand-in for update(): animate, run timers down, glide towards the host's position.

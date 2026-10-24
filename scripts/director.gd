@@ -208,6 +208,13 @@ func random_event(force: String = "") -> void:
 	if Game.inventory_count() > 0:
 		ev["merchant"] = 2
 	ev["lucky"] = 4 if Game.has_relic("black_cat") else 1
+	# a farmer is struck by inspiration and marks out a crop picture
+	var art := 0
+	for f in world.fields:
+		if f.has("paint"):
+			art += 1
+	if not Game.is_night() and art < 3 and world.fields.size() < 14:
+		ev["inspiration"] = 3
 	# the strange stuff, unlocked by weirdness
 	var w := Game.weird
 	if w >= 10 and Game.is_night():
@@ -290,6 +297,17 @@ func run_event(id: String) -> void:
 		"merchant":
 			spawn_animal("merchant", Vector2(-16, world.feet(world.BIN_FRONT).y))
 			Game.add_log("A travelling merchant arrives.")
+		"inspiration":
+			var f: Dictionary = world.plan_pattern("", true)
+			if not f.is_empty():
+				var who: Farmer = world.farmer
+				if world.friend and world.friend.visible_outside() and randf() < 0.5:
+					who = world.friend
+				who.say(["I had a dream... a %s made of crops!", "Inspiration! A %s! Right there!",
+					"The farm wants a %s. I can feel it."].pick_random() % f["shape"], 4.0)
+				Game.add_log("%s was struck by inspiration: a %s crop picture." % [who.who(), f["shape"]])
+				for c in f["cells"]:
+					world.puff(world.center(c), Color("e0c08a"), 2, 6.0)
 		"butterflies":
 			for i in randi_range(3, 5):
 				spawn_animal("butterfly", Vector2(randf_range(10, 180), randf_range(20, world.ROWS * 16 - 16)))

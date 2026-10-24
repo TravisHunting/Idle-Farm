@@ -291,6 +291,16 @@ Autoload `Net` (`scripts/net.gd`), the same node path on both sides, so RPCs jus
   `Godot --path . -- profile=2` next to a normal run; host in one (gear > HOST THIS FARM), join
   `127.0.0.1:24680` in the other.
 
+### After phase 5: two farmers (v0.8)
+- The host calls `World.ensure_friend(pid)` in `_hello`: the guest gets `World.friend` (a second Farmer, `friend =
+  true`) and a hut + mailbox (objects with `pid`). Not if the pid is the farmhouse farmer's (`farmer.pid`, the world's
+  first owner): the old host visiting a fork lives in the farmhouse. One hut per world; a different visitor takes it over.
+- `friend` runs only while `Game.present` has his pid, else `go_away()` (state "away", hidden at the hut). Saved in
+  the world (`"friend"`), so the guest's fork keeps their farmer working. Streamed with kind "friend"; `pid` and
+  `home` are in `Farmer.net_fields()`.
+- New commands: `poke {x, y}` (click-to-clear, 80ms per-player limit; a refused poke sends no `_refused`) and
+  `read_letter`.
+
 ## Risks / gotchas to keep in mind
 - `World.from_dict` rebuilds actors: never call it per snapshot on the guest (task 1.4 split).
 - Anything that mutates state from a timer/tween/await bypasses the puppet gate: audit in 0.6.
@@ -328,3 +338,6 @@ Autoload `Net` (`scripts/net.gd`), the same node path on both sides, so RPCs jus
   simulation on the streamed actors (input comes before `_process`; puppet was already off) -> a farmer
   `task["cell"]` error in windowed runs. `World._process` now simulates only while `Game.running`. SHARED
   tag moved. `settings["port"]` added. 5.4 docs. Left: 5.3.
+- 2026-10-24: v0.8 two farmers (guest's farmer + hut + mailbox), `poke` / `read_letter` commands. Net test extended
+  (guest sees its farmer and hut, a guest click pulls a weed, its farmer works on in the fork, no second hut when
+  the old host visits); net (3 copies), click and sim tests pass.

@@ -114,6 +114,7 @@ changed drastically and lose territory). Four factions compete for the 12x22 far
 | `scripts/deck.gd` (class **Deck**) | **The card content** (70 cards, pure data). Its header documents every requirement and effect keyword. Add new cards here. |
 | `scripts/commands.gd` (class **Commands**) | Every player action as a command (`submit` / `execute(pid, cmd)`): play a card, move a card, card cadence, speed, debug keys. Validates everything (multiplayer, see `MULTIPLAYER.md`). |
 | `scripts/net.gd` (autoload **Net**) | Two-player networking over ENet: host/join, handshake, guest commands -> host, state snapshots + actor deltas + one-shot effects -> guest (puppet mode). See `MULTIPLAYER.md`. |
+| `scripts/chores.gd` (class **Chores**) | Grandpa's letter: 8 starter chores (pull weeds, play a card, smash rocks, plant, harvest, build, clear 40%, grow a crop picture); each one done mails a card to every player here. Read it by clicking a mailbox. State in `Game.chores`. |
 | `scripts/text_entry.gd` (class **TextEntry**) | One-line text field for the pixel-font UI (join address, player name). |
 | `scripts/cards.gd` | **Card engine**: weighted drawing (rarity, level, weirdness, `needs`), requirement checks with progress text, auto-costs, effect interpreter (`apply`), gamble/delay, relic gain/loss + passives (daily/dawn/night hooks), companion actors. |
 | `scripts/welcome.gd` | Welcome screen: how-to-play page, then 3 save slots with summaries + delete. |
@@ -290,6 +291,21 @@ Key systems added in v0.3:
 - [x] Comebacks: re-arrivals, wild floods back after the silence, the farmer breaks new ground
 - [x] Verified headless: forced cataclysms wipe each faction and both the farm and the wild return; long natural runs (see changelog)
 
+### v0.8: two farmers, crop pictures, an engaging start
+- [x] Multiplayer: the visiting player gets their own farmer (`World.friend`, green overalls, same AI, never
+  touches the shared stats) living in a hut with a mailbox; he goes home while his player is away
+- [x] Mailboxes (farmhouse too, old saves get one): flag up while that player has cards in their box
+- [x] Crop pictures (`World.PATTERNS`: arrow, heart, diamond, star, flower, sun, bullseye, checkerboard, crop circle)
+  in two crops; planned now and then instead of a field, or by the new "inspiration" event; tilled past the field
+  cap; "MASTERPIECE!" + trinkets when every tile has sprouted
+- [x] Click overgrowth to clear it yourself (`World.TAPS`: weeds 1 click, rocks 3, boulders 8...), same drops as
+  the farmer, sometimes one of grandpa's trinkets; hover outline shows what a click would do
+- [x] Grandpa's letter of starter chores (`chores.gd`), each mailing a card
+- [x] Verified headless: sim_test section "homes, crop pictures, helping hands", net test (guest's farmer/hut seen on
+  both sides, a guest click pulls a weed, the fork keeps the guest's farmer), click test; guest screenshots checked
+- [ ] Played by a person for feel (pace of the first 10 minutes; whether chores are too fast/slow)
+- [ ] Hut art is a first pass; the hut is one tile (the farmhouse is 2x2)
+
 ### v0.7: two-player "join world" (in progress)
 - [ ] Multiplayer: host-authoritative ENet + UPnP, join by IP, per-player card boxes, both keep a
   copy when someone leaves. **Full plan, decisions and task checklist: `MULTIPLAYER.md`.**
@@ -330,12 +346,20 @@ Key systems added in v0.3:
   missing ones draw magenta.
 - Calls on nodes typed as plain `Node` (e.g. `director.spawn_animal`) return Variant: give the
   variable an explicit type instead of `:=`.
+- `World.is_house(c)` is true for huts and mailboxes too (protected like the farmhouse); a mailbox is not solid.
+  Farmer code must use `door()` / `home_px()` instead of `world.DOOR` / `house_px()` (the visitor's farmer has a hut).
 - Multiplayer: on a guest `Game.puppet` is true and nothing may change the world; gate new `_process`
   logic with `Game.simulating()` and send player actions through `commands.submit()`. A new actor
   field the guest must see goes in that actor's `net_fields()`. Never run the net test with `upnp=1`
   (a real router port mapping) without the user's OK.
 
 ## Changelog
+- 2026-10-24 - v0.8: in multiplayer both farmers are on the farm: the visitor's farmer (`World.friend`,
+  `Farmer.friend/home/pid`) lives in a hut with a mailbox placed when they first join, and goes home when they
+  leave. Every player has a mailbox (flag up = cards waiting). Crop pictures: two-crop patterns, sometimes planned
+  instead of a field and by an "inspiration" event, celebrated when sprouted. A faster start: click weeds/rocks/trees
+  to clear them yourself, and grandpa's letter (click a mailbox) lists 8 starter chores that each mail a card.
+  New commands `poke` and `read_letter`; `is_house()` now also covers huts/mailboxes (`is_doorstep()` for the steps).
 - 2026-10-24 - Added `build-game.ps1` at the project root to import resources and export the Windows
   release from any working directory, with an optional `-GodotPath` and failure checks. README
   build instructions now use the script. Verified a complete build under Windows PowerShell 5.1

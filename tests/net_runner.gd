@@ -2,6 +2,7 @@ extends Node
 ## Two copies of the game on localhost (MULTIPLAYER.md): A hosts a farm, B joins it, then the roles
 ## swap. Runs in real time (the network needs real frames). The script, in order:
 ##   1. A hosts (port P), B joins: B lands in puppet mode with A's world, actors stream in and move,
+##      B gets a farmer, hut and mailbox of its own (seen on both sides), clicks a weed away,
 ##      a card A gives B arrives, B plays it by command and sees the result; bandwidth report.
 ##      B signals "done" by moving a card to its stash.
 ##   2. A stops hosting (says bye): B keeps the farm as its own fork (owner B, new world id, saved,
@@ -127,6 +128,9 @@ func _a() -> void:
 	var g := Net.guest_pid
 	check(Game.hands.has(g) and Game.present.has(g), "the guest has a hand and is present")
 	check(Game.owner_pid == Game.my_pid, "the host still owns the world")
+	var wd: World = main.world
+	check(wd.friend != null and wd.friend.pid == g and wd.cells_with_obj(["hut"]).size() == 1,
+		"the guest got a farmer and a hut on our farm")
 	await wait(2.0)
 	for i in 3:
 		main.cards.draw_card(g)
@@ -178,6 +182,21 @@ func _b() -> void:
 	var t_join := Time.get_ticks_msec() / 1000.0
 	check(host_pid != Game.my_pid, "the world belongs to the host")
 	check(main.world.farmer != null and main.world.objs.size() > 10, "the farm arrived (%d objects)" % main.world.objs.size())
+	var wd: World = main.world
+	check(await until(func() -> bool: return wd.friend != null and wd.friend.pid == Game.my_pid, 10.0),
+		"our own farmer streamed in")
+	var homes := 0
+	for c in wd.cells_with_obj(["hut", "mailbox"]):
+		if String(wd.objs[c].get("pid", "")) == Game.my_pid:
+			homes += 1
+	check(homes == 2, "we have a hut and a mailbox on the host's farm")
+	var weed := Vector2i(-1, -1)
+	for c in wd.cells_with_obj(["weed", "tallgrass"]):
+		weed = c
+	if weed.x >= 0:
+		main.commands.submit({"type": "poke", "x": weed.x, "y": weed.y})
+		check(await until(func() -> bool: return wd.obj_type(weed) == "" or wd.obj_type(weed) == "stump", 10.0),
+			"our click pulled a weed on the host's farm")
 	var p0: Vector2 = main.world.farmer.pos
 	var aliens := await until(func() -> bool:
 		for a in main.world.animals:
@@ -213,7 +232,11 @@ func _b() -> void:
 		await wait(0.3)
 		get_viewport().get_texture().get_image().save_png(shot.get_basename() + "_settings.png")
 		main.hud.settings_open = false
-		print("[guest] screenshots: ", shot, " + _settings")
+		main.hud.letter_open = true
+		await wait(0.3)
+		get_viewport().get_texture().get_image().save_png(shot.get_basename() + "_letter.png")
+		main.hud.letter_open = false
+		print("[guest] screenshots: ", shot, " + _settings, _letter")
 	print("[guest] join + play took %.1fs" % (Time.get_ticks_msec() / 1000.0 - t_join))
 	# steady-state bandwidth (the welcome packet with the whole farm is excluded)
 	var b0 := int(Net.stats["received"])
@@ -244,15 +267,20 @@ func _b() -> void:
 	for a in main.world.animals:
 		uids[a.uid] = true
 	check(uids.size() == main.world.animals.size() + 1 and main.world.next_uid > uids.keys().max(), "actor ids still unique, counter ahead")
+	var me: Farmer = main.world.friend
+	check(me != null and me.pid == Game.my_pid and not uids.has(me.uid), "our farmer stays on in our fork")
 	var p1: Vector2 = main.world.farmer.pos
 	var pop: int = main.world.animals.size()
 	await until(func() -> bool: return main.world.farmer.pos.distance_to(p1) > 2.0, 15.0)
 	check(main.world.farmer.pos.distance_to(p1) > 2.0, "the farm simulates on our side now (%d actors kept)" % pop)
+	check(await until(func() -> bool: return me.state != "away" and me.activity != "", 10.0), "our farmer works in our fork")
 	# 3. host our fork; the old host comes to visit
 	check(Net.host(port + 1) == OK, "hosting our fork on port %d" % (port + 1))
 	if not check(await until(func() -> bool: return Net.guest_pid != "", 30.0), "the old host joined our fork"):
 		return
 	check(Net.guest_pid == host_pid and Game.hand(host_pid)["box"] == host_hand, "the old host's hand was kept, not recreated")
+	check(main.world.cells_with_obj(["hut"]).size() == 1 and main.world.friend.pid == Game.my_pid,
+		"the old host lives in the farmhouse: no second hut")
 	# 4. the visitor leaves
 	var left := await until(func() -> bool: return Net.guest_pid == "", 60.0)
 	check(left, "noticed the visitor leaving")

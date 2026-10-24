@@ -48,7 +48,9 @@ moment to connect. If the editor isn't open, ask the user to open the project in
 - `CLAUDE.md` — short agent notes (debug keys, verification workflow).
 - Card content: `scripts/deck.gd` (documented mini-language). Card logic: `scripts/cards.gd`.
 - Farm generation, fields and paths: `scripts/world.gd`. Farmer AI: `scripts/farmer.gd`.
-- UI (box, stash, card modal, settings): `scripts/hud.gd`.
+- UI (box, stash, card modal, settings, grandpa's letter): `scripts/hud.gd`. Starter chores: `scripts/chores.gd`.
+- Crop pictures: `World.PATTERNS`; click-to-clear: `World.poke` / `World.TAPS`; players' huts + mailboxes:
+  `World.ensure_homes` / `ensure_friend` (the visitor's farmer is `World.friend`).
 - Alien faction: `scripts/colony.gd` + `scripts/alien.gd`; mutant insects: `scripts/swarm.gd` +
   `scripts/insect.gd`; faction balance: `scripts/tides.gd`.
 

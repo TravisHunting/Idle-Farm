@@ -97,6 +97,27 @@ const SHAPES := {
 const SILLY := ["heart", "smiley", "ring", "plus", "diagonal", "zigzag", "ell", "letter_f", "checker"]
 const SENSIBLE := ["patch", "block", "rows", "stripes", "line"]
 
+## Crop pictures: two crops (a, b) planted as a design. Never nudged out of line, tilled even
+## past the usual field cap, and celebrated once every tile is up and growing ("in full bloom").
+const PATTERNS := {
+	"arrow":        ["..a..", ".aaa.", "a.b.a", "..b..", "..b.."],
+	"heart":        [".a.a.", "abbba", ".aba.", "..a.."],
+	"diamond":      ["..a..", ".aba.", "abbba", ".aba.", "..a.."],
+	"star":         ["..a..", ".aaa.", "aabaa", ".a.a.", "a...a"],
+	"flower":       [".a.a.", "aabaa", ".bbb.", "aabaa", ".a.a."],
+	"sun":          ["a.a.a", ".bbb.", "abbba", ".bbb.", "a.a.a"],
+	"bullseye":     ["aaaaa", "a...a", "a.b.a", "a...a", "aaaaa"],
+	"checkerboard": ["abab", "baba", "abab", "baba"],
+	"crop circle":  ["..aaa..", ".a...a.", "a..b..a", "a.bbb.a", "a..b..a", ".a...a.", "..aaa.."],
+}
+
+## Players' homes: the farmhouse mailbox, and a visiting player's hut + mailbox (multiplayer).
+## They count as part of the house: never cleared, burned, dug up or built over.
+const HOME := ["hut", "mailbox"]
+## Overgrowth the player can clear by clicking it: clicks needed.
+const TAPS := {"weed": 1, "tallgrass": 1, "ash": 1, "bush": 3, "bramble": 3, "rock": 3, "log": 4,
+	"stump": 5, "boulder": 8, "tree": 7, "pine": 7, "i_web": 2, "i_fungus": 2, "i_hole": 2, "i_husk": 1, "a_husk": 2}
+
 var ground := PackedInt32Array()       # G_* per cell
 var wet := PackedFloat32Array()        # 0..1
 var gvar := PackedInt32Array()         # grass variant
@@ -112,6 +133,7 @@ var DOOR := Vector2i(1, 2)
 var BIN := Vector2i(3, 1)
 var BIN_FRONT := Vector2i(3, 2)
 var farmer: Farmer
+var friend: Farmer                     # the visiting player's farmer (lives in the hut), or null
 var animals: Array = []
 var next_uid := 1                      # actor ids (farmer + animals), stable across saves (multiplayer sync)
 var particles: Array = []              # {p, v, life, c}
@@ -123,6 +145,7 @@ var colony: Colony
 var swarm: Swarm
 
 var _weed_t := 0.0
+var _pattern_t := 0.0
 var _anim_t := 0.0
 
 
@@ -197,6 +220,8 @@ func new_farm() -> void:
 	Game.gain_trinkets(rng.randi_range(18, 40), false)
 	farmer = Farmer.new(self)
 	farmer.pos = feet(DOOR)
+	farmer.pid = Game.owner_pid
+	ensure_homes()
 
 
 func _set_house(top_left: Vector2i, bin_left: bool) -> void:
@@ -341,8 +366,16 @@ func house_px() -> Vector2:
 	return Vector2(house * T)
 
 
+## The farmhouse, or a hut / mailbox (see HOME).
 func is_house(c: Vector2i) -> bool:
-	return c.x >= house.x and c.x <= house.x + 1 and c.y >= house.y and c.y <= house.y + 1
+	if c.x >= house.x and c.x <= house.x + 1 and c.y >= house.y and c.y <= house.y + 1:
+		return true
+	return objs.has(c) and objs[c]["type"] in HOME
+
+
+## The step in front of the farmhouse or a hut: kept free.
+func is_doorstep(c: Vector2i) -> bool:
+	return c == DOOR or obj_type(c + Vector2i(0, -1)) == "hut"
 
 
 func is_tilled(c: Vector2i) -> bool:
@@ -390,7 +423,7 @@ func remove_obj(c: Vector2i) -> void:
 
 
 func is_solid(c: Vector2i) -> bool:
-	if is_house(c) or is_water(c):
+	if (is_house(c) and obj_type(c) != "mailbox") or is_water(c):
 		return true
 	if not objs.has(c):
 		return false
@@ -408,7 +441,7 @@ func is_walkable(c: Vector2i) -> bool:
 
 func is_free_grass(c: Vector2i) -> bool:
 	return in_bounds(c) and not is_house(c) and ground[idx(c)] == G_GRASS and not objs.has(c) \
-		and c != DOOR and c != BIN_FRONT and not crops.has(c) and not alien_land.has(c) \
+		and not is_doorstep(c) and c != BIN_FRONT and not crops.has(c) and not alien_land.has(c) \
 		and not insect_land.has(c)
 
 
@@ -462,7 +495,7 @@ func free_or_overgrown_cells() -> Array:
 	for y in ROWS:
 		for x in COLS:
 			var c := Vector2i(x, y)
-			if in_bounds(c) and not is_house(c) and ground[idx(c)] == G_GRASS and c != DOOR \
+			if in_bounds(c) and not is_house(c) and ground[idx(c)] == G_GRASS and not is_doorstep(c) \
 					and c != BIN_FRONT and not crops.has(c) and (not objs.has(c) or is_clearable(c)):
 				out.append(c)
 	return out
@@ -611,7 +644,7 @@ func is_planned(c: Vector2i) -> bool:
 
 ## A cell that can (eventually) be tilled for a field.
 func _field_ok(c: Vector2i) -> bool:
-	if not in_bounds(c) or is_house(c) or c == DOOR or c == BIN or c == BIN_FRONT:
+	if not in_bounds(c) or is_house(c) or is_doorstep(c) or c == BIN or c == BIN_FRONT:
 		return false
 	if ground[idx(c)] != G_GRASS or crops.has(c) or alien_land.has(c) or insect_land.has(c):
 		return false
@@ -719,6 +752,123 @@ func plan_field(shape: String = "", crop: String = "", capacity: int = -1) -> Di
 	return f
 
 
+## Plans a crop picture (PATTERNS, random if ""). Unless `any_size`, only one that fits under the
+## field cap (at least a small one). Returns the field ({} if nothing fits).
+func plan_pattern(name_: String = "", any_size: bool = false) -> Dictionary:
+	var cap := maxi(13, Game.max_tilled() - tilled_cells().size() - planned_open())
+	var options: Array = []
+	for k in PATTERNS:
+		if (name_ == "" or k == name_) and (any_size or _mask_cells(PATTERNS[k], "ab").size() <= cap):
+			options.append(k)
+	options.shuffle()
+	for pick: String in options:
+		var rel: Array = []
+		var mask: Array = PATTERNS[pick]
+		for y in mask.size():
+			for x in String(mask[y]).length():
+				if mask[y][x] != ".":
+					rel.append([Vector2i(x, y), mask[y][x]])
+		var flip := randf() < 0.5
+		var w := String(mask[0]).length()
+		var h := mask.size()
+		var best: Variant = null
+		var best_s := 1e9
+		for attempt in 120:
+			var a := Vector2i(randi_range(0, COLS - w), randi_range(0, ROWS - h))
+			var ok := true
+			var score := 0.0
+			for r in rel:
+				var v: Vector2i = r[0]
+				var c: Vector2i = a + (Vector2i(w - 1 - v.x, v.y) if flip else v)
+				if not _field_ok(c) or _touches_field(c):
+					ok = false
+					break
+				if objs.has(c):
+					score += 1.2 if obj_type(c) in ["boulder", "tree", "pine", "stump", "log"] else 0.15
+			if not ok:
+				continue
+			score += Vector2(a + Vector2i(w, h) / 2).distance_to(Vector2(DOOR)) * 0.6 + randf() * 3.0
+			if score < best_s:
+				best_s = score
+				best = a
+		if best == null:
+			continue
+		var pair := _pattern_crops()
+		var cells: Array = []
+		var paint := {}
+		for r in rel:
+			var v2: Vector2i = r[0]
+			var c2: Vector2i = best + (Vector2i(w - 1 - v2.x, v2.y) if flip else v2)
+			cells.append(c2)
+			paint[c2] = pair[0] if r[1] == "a" else pair[1]
+		var f := {"cells": cells, "shape": pick, "crop": "pattern", "paint": paint}
+		fields.append(f)
+		return f
+	return {}
+
+
+## Two crops that look different side by side (the same one twice if only one is unlocked).
+func _pattern_crops() -> Array:
+	var opts: Array = []
+	for id in Game.CROPS:
+		if id != "melon" and Game.crop_unlocked(id):
+			opts.append(id)
+	if opts.is_empty():
+		opts = ["turnip"]
+	opts.shuffle()
+	return [opts[0], opts[1] if opts.size() > 1 else opts[0]]
+
+
+func is_pattern(c: Vector2i) -> bool:
+	var fi := field_index(c)
+	return fi >= 0 and fields[fi].has("paint")
+
+
+## What a crop picture wants on cell c ("" = not part of one).
+func pattern_crop(c: Vector2i) -> String:
+	var fi := field_index(c)
+	if fi < 0 or not fields[fi].has("paint"):
+		return ""
+	return String(fields[fi]["paint"].get(c, ""))
+
+
+## A crop picture whose every tile has sprouted is "in full bloom": a little celebration, once
+## per planting.
+func _check_patterns() -> void:
+	for f in fields:
+		if not f.has("paint"):
+			continue
+		var full := true
+		for c in f["cells"]:
+			if not crops.has(c) or crop_stage(crops[c]) < 1:
+				full = false
+				break
+		if not full:
+			f["bloom"] = false
+			continue
+		if f.get("bloom", false):
+			continue
+		f["bloom"] = true
+		var mid := Vector2.ZERO
+		for c in f["cells"]:
+			mid += center(c)
+			puff(center(c), Color("ffcd75"), 2, 10.0)
+		mid /= float(f["cells"].size())
+		float_text("MASTERPIECE!", mid + Vector2(-26, -12), Color("a7f070"))
+		Game.mood = minf(100.0, Game.mood + 12.0)
+		Game.bump("patterns")
+		loot_trinkets(Game.scaled_reward(12), mid)
+		if f["shape"] == "crop circle":
+			Game.add_weird(2.0)
+		var who: Farmer = farmer
+		if friend and friend.visible_outside() and randf() < 0.5:
+			who = friend
+		if who:
+			who.say(["Look at it! You can see that from the sky!", "My %s! It's beautiful!" % f["shape"],
+				"Art. Pure art."].pick_random(), 4.0)
+		Game.add_log("The %s crop picture is in full bloom!" % f["shape"])
+
+
 func _fancy_crop() -> String:
 	var opts: Array = []
 	for id in Game.CROPS:
@@ -735,12 +885,12 @@ func _touches_field(c: Vector2i) -> bool:
 	return false
 
 
-func _mask_cells(mask: Array) -> Array:
+func _mask_cells(mask: Array, marks: String = "#") -> Array:
 	var out: Array = []
 	for y in mask.size():
 		var row: String = mask[y]
 		for x in row.length():
-			if row[x] == "#":
+			if row[x] in marks:
 				out.append(Vector2i(x, y))
 	return out
 
@@ -948,6 +1098,155 @@ func overgrow(n: int, types: Array = ["weed", "tallgrass", "bush", "bramble"]) -
 		puff(center(cells[i]), Color("38b764"), 3, 8.0)
 
 
+# ---------------------------------------------------------------- homes (multiplayer) & helping hands
+## The farmhouse gets a mailbox (old saves too). Its flag is up while that player has cards waiting.
+func ensure_homes() -> void:
+	if farmer == null:
+		return
+	for c in objs:
+		if objs[c]["type"] == "mailbox" and String(objs[c].get("pid", "")) == farmer.pid:
+			return
+	var spots := [DOOR + Vector2i(1, 0), DOOR + Vector2i(-1, 0), DOOR + Vector2i(2, 0), DOOR + Vector2i(-2, 0)]
+	if BIN.x > house.x:
+		spots = [DOOR + Vector2i(-1, 0), DOOR + Vector2i(1, 0), DOOR + Vector2i(-2, 0), DOOR + Vector2i(2, 0)]
+	for c: Vector2i in spots:
+		if _home_ok(c):
+			remove_obj(c)
+			crops.erase(c)
+			if ground[idx(c)] == G_TILLED:
+				ground[idx(c)] = G_GRASS
+			objs[c] = {"type": "mailbox", "hp": 999, "pid": farmer.pid}
+			return
+
+
+## A visiting player (pid) gets their own farmer, living in a hut with a mailbox. Called by the
+## host when someone joins; a returning player finds their hut and farmer as they left them.
+func ensure_friend(pid: String) -> void:
+	if pid == "" or (farmer and farmer.pid == pid):
+		return   # the farmhouse's own player (e.g. the old host visiting a fork of their farm)
+	var hut := Vector2i(-1, -1)
+	for c in objs:
+		if objs[c]["type"] == "hut":
+			hut = c
+			break
+	if hut.x < 0:
+		hut = _place_hut(pid)
+	var old := friend.pid if friend else ""
+	for c in objs:
+		var o: Dictionary = objs[c]
+		if o["type"] == "hut" or (o["type"] == "mailbox" and String(o.get("pid", "")) != farmer.pid
+				and String(o.get("pid", "")) in [old, pid, ""]):
+			o["pid"] = pid
+	if friend == null:
+		friend = Farmer.new(self)
+		friend.friend = true
+		friend.home = hut
+		friend.pos = feet(friend.door())
+	friend.pid = pid
+	friend.home = hut
+	friend.state = "idle"
+	friend.hidden = false
+	friend.think_t = 1.5
+	friend.say("Howdy, neighbour!" if old != pid else "I'm back!", 3.5)
+
+
+## Hut on a free spot a few steps from the farmhouse, door facing down, mailbox beside it.
+## Returns the hut cell ((-1, -1) if the farm has no room: the friend then shares the farmhouse).
+func _place_hut(pid: String) -> Vector2i:
+	var reach := reachable_from(DOOR)
+	for pass_ in 2:
+		var best := Vector2i(-1, -1)
+		var best_m := Vector2i(-1, -1)
+		var best_s := 1e9
+		for y in ROWS - 1:
+			for x in COLS:
+				var h := Vector2i(x, y)
+				var d := h + Vector2i(0, 1)
+				var dist := Vector2(h).distance_to(Vector2(DOOR))
+				if dist < 3.0 or dist > (8.0 if pass_ == 0 else 30.0):
+					continue
+				if not _home_ok(h) or not _home_ok(d):
+					continue
+				var m := h + Vector2i(1, 0)
+				if not _home_ok(m) or m == d:
+					m = h + Vector2i(-1, 0)
+					if not _home_ok(m):
+						continue
+				var near := reach.has(d)
+				for dd in DIRS:
+					near = near or reach.has(d + dd)
+				if not near and pass_ == 0:
+					continue
+				if not keeps_connected(h):
+					continue
+				var s := absf(dist - 4.5) + y * 0.3 + randf() * 2.0
+				for c in [h, d, m]:
+					if objs.has(c):
+						s += 0.8
+				if s < best_s:
+					best_s = s
+					best = h
+					best_m = m
+		if best.x >= 0:
+			for c in [best, best + Vector2i(0, 1), best_m]:
+				remove_obj(c)
+				crops.erase(c)
+				if ground[idx(c)] == G_TILLED:
+					ground[idx(c)] = G_GRASS
+			objs[best] = {"type": "hut", "hp": 999, "pid": pid}
+			objs[best_m] = {"type": "mailbox", "hp": 999, "pid": pid}
+			ground[idx(best + Vector2i(0, 1))] = G_PATH
+			puff(center(best), Color("c28a5a"), 12, 20.0)
+			return best
+	return Vector2i(-1, -1)
+
+
+## Somewhere a hut, its doorstep or a mailbox can go (clearing overgrowth if need be).
+func _home_ok(c: Vector2i) -> bool:
+	if not in_bounds(c) or is_house(c) or is_doorstep(c) or c == BIN or c == BIN_FRONT or is_water(c):
+		return false
+	if alien_land.has(c) or insect_land.has(c) or is_planned(c) or crops.has(c):
+		return false
+	return not objs.has(c) or TAPS.has(obj_type(c))
+
+
+## The player clears overgrowth on cell c by clicking it (a few clicks for the tough stuff).
+## Same drops as when the farmer does it, now and then one of grandpa's trinkets.
+func poke(c: Vector2i) -> bool:
+	var t := obj_type(c)
+	if not TAPS.has(t):
+		return false
+	var o: Dictionary = objs[c]
+	o["taps"] = int(o.get("taps", 0)) + 1
+	var col := Color("94b0c2") if t in ["rock", "boulder"] else (Color("8b5a3c") if t in ["log", "stump", "tree", "pine"] else Color("38b764"))
+	if int(o["taps"]) < int(TAPS[t]):
+		puff(center(c), col, 3, 12.0)
+		float_text("%d" % (int(TAPS[t]) - int(o["taps"])), center(c) + Vector2(-2, -14), Color("f4f4f4"))
+		return true
+	remove_obj(c)
+	puff(center(c), col, 9, 20.0)
+	if t in TREES:
+		place_obj(c, "stump")
+		Game.add_item("wood", 3)
+		float_text("+3 WOOD", center(c) + Vector2(-14, -16), Color("e0c08a"))
+	elif CLEARABLE.has(t):
+		var drops: Dictionary = CLEARABLE[t]["drops"]
+		for k in drops:
+			Game.add_item(k, int(drops[k]))
+		if drops.size() > 0:
+			var k0: String = drops.keys()[0]
+			float_text("+%d %s" % [drops[k0], k0.to_upper()], center(c) + Vector2(-14, -16), Color("e0c08a"))
+	Game.bump("pulled" if t in ["weed", "tallgrass"] else ("smashed" if t in ["rock", "boulder"] else "hand_cleared"))
+	if randf() < 0.07:
+		loot(["old_bottle", "rusty_key", "arrowhead", "marble", "button"].pick_random(), 1, center(c))
+	var f := farmer
+	if friend and friend.visible_outside() and friend.pos.distance_to(center(c)) < farmer.pos.distance_to(center(c)):
+		f = friend
+	if f and f.visible_outside() and f.bubble_t <= 0.0 and randf() < 0.2:
+		f.say(["Thanks for the hand!", "Ooh, a helper!", "Teamwork!", "You're good at this!"].pick_random())
+	return true
+
+
 # ---------------------------------------------------------------- simulation
 func _process(delta: float) -> void:
 	var d := delta * Game.time_scale
@@ -956,6 +1255,8 @@ func _process(delta: float) -> void:
 	if Game.puppet:
 		if farmer:
 			farmer.net_tick(d)
+		if friend:
+			friend.net_tick(d)
 		for a in animals:
 			a.net_tick(d)
 	elif Game.running:
@@ -974,6 +1275,12 @@ func _simulate(d: float) -> void:
 	_update_ground(d)
 	if farmer:
 		farmer.update(d)
+	if friend:
+		# the visiting player's farmer only works while they are here; otherwise he is at home
+		if Game.present.has(friend.pid):
+			friend.update(d)
+		else:
+			friend.go_away()
 	for a in animals.duplicate():
 		a.update(d)
 		if a.dead:
@@ -982,6 +1289,10 @@ func _simulate(d: float) -> void:
 				colony.on_gone(a)
 			elif a is Insect and swarm:
 				swarm.on_gone(a)
+	_pattern_t += d
+	if _pattern_t > 3.0:
+		_pattern_t = 0.0
+		_check_patterns()
 	_weed_t += d
 	if _weed_t > 25.0:
 		_weed_t = 0.0
@@ -1269,7 +1580,14 @@ func to_dict(with_actors: bool = true) -> Dictionary:
 		var cells: Array = []
 		for c in f["cells"]:
 			cells.append("%d,%d" % [c.x, c.y])
-		fl.append({"cells": cells, "shape": f["shape"], "crop": f["crop"]})
+		var fd := {"cells": cells, "shape": f["shape"], "crop": f["crop"]}
+		if f.has("paint"):
+			var paint := {}
+			for c in f["paint"]:
+				paint["%d,%d" % [c.x, c.y]] = f["paint"][c]
+			fd["paint"] = paint
+			fd["bloom"] = f.get("bloom", false)
+		fl.append(fd)
 	var land: Array = []
 	for c: Vector2i in alien_land:
 		land.append("%d,%d" % [c.x, c.y])
@@ -1280,7 +1598,8 @@ func to_dict(with_actors: bool = true) -> Dictionary:
 	for c in bare:
 		br["%d,%d" % [c.x, c.y]] = bare[c]
 	return {"alien_land": land, "insect_land": tun, "bare": br, "rows": ROWS, "ground": Array(ground), "wet": Array(wet), "crops": cr, "objs": ob, "animals": an,
-		"farmer": farmer.to_dict() if farmer and with_actors else {}, "fields": fl, "biome": biome,
+		"farmer": farmer.to_dict() if farmer and with_actors else {},
+		"friend": friend.to_dict() if friend and with_actors else {}, "fields": fl, "biome": biome,
 		"house": "%d,%d" % [house.x, house.y], "bin": "%d,%d" % [BIN.x, BIN.y], "next_uid": next_uid}
 
 
@@ -1326,7 +1645,14 @@ func load_grid(d: Dictionary) -> void:
 		var cells: Array = []
 		for k in f.get("cells", []):
 			cells.append(_key_cell(String(k)))
-		fields.append({"cells": cells, "shape": String(f.get("shape", "patch")), "crop": String(f.get("crop", "any"))})
+		var fd := {"cells": cells, "shape": String(f.get("shape", "patch")), "crop": String(f.get("crop", "any"))}
+		if f.has("paint"):
+			var paint := {}
+			for k in f["paint"]:
+				paint[_key_cell(String(k))] = String(f["paint"][k])
+			fd["paint"] = paint
+			fd["bloom"] = bool(f.get("bloom", false))
+		fields.append(fd)
 	if rows_saved < ROWS:
 		_grow_old_farm(rows_saved)
 	alien_land.clear()
@@ -1352,7 +1678,16 @@ func load_actors(d: Dictionary) -> void:
 	farmer = Farmer.new(self)
 	farmer.pos = feet(DOOR)
 	farmer.from_dict(d.get("farmer", {}))
+	if farmer.pid == "":
+		farmer.pid = Game.owner_pid   # saves from before players had homes
 	var top := farmer.uid
+	friend = null
+	var fd: Dictionary = d.get("friend", {})
+	if not fd.is_empty():
+		friend = Farmer.new(self)
+		friend.friend = true
+		friend.from_dict(fd)
+		top = maxi(top, friend.uid)
 	for ad in d.get("animals", []):
 		var kind := String(ad.get("kind", "chicken"))
 		var ap := Vector2(float(ad.get("x", 80)), float(ad.get("y", 80)))
