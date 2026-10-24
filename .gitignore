@@ -5,3 +5,6 @@ addons/
 dist/build/
 build/
 dist/
+
+# Personal build configuration
+/build-game.local.ps1

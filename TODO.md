@@ -160,10 +160,15 @@ Key systems added in v0.3:
 - Needs the Godot 4.7.2 export templates (Editor -> Manage Export Templates -> Download and Install).
 - CLI: `Godot_v4.7.2-stable_win64_console.exe --headless --path . --export-release "Windows Desktop" build/IdleFarm.exe`
 - Run `.\build-game.ps1` to create `build/`, import resources and export; optional `-GodotPath`
-  selects the console executable. Direct CLI exports need `build/` created beforehand.
+  selects an executable path or command name. Otherwise it uses `GODOT_PATH`, then searches PATH
+  for `godot4`, `godot` or `Godot`. Direct CLI exports need `build/` created beforehand.
+- `.\build-game.local.ps1` is a gitignored wrapper for this machine's Godot installation.
+  It caches the existing Windows templates under `.godot/local-build/roaming/` and temporarily
+  sets APPDATA for the build, restoring the caller's value afterward.
 - Tests, documentation, editor addons and build output are excluded from the package.
 - [x] Windows x64 release exported as one executable; standalone headless and windowed launch verified.
 - [x] Root PowerShell build script with resource import, configurable Godot path and export error checks.
+- [x] Portable Godot discovery in the shared script; personal paths live in a gitignored local wrapper.
 
 ## Checklist
 
@@ -354,6 +359,16 @@ Key systems added in v0.3:
   (a real router port mapping) without the user's OK.
 
 ## Changelog
+- 2026-10-24 - Fixed the local build's missing-template failure by caching the existing 4.7.2
+  Windows templates inside the ignored `.godot/local-build/roaming/` directory and explicitly
+  selecting that build profile through a temporary APPDATA value. Shared build script unchanged.
+  Verified from the repository root in Windows PowerShell 5.1 with the original profile pointing
+  at an empty location; export succeeded and the caller's APPDATA was restored.
+- 2026-10-24 - Made `build-game.ps1` independent of machine paths and versioned executable names:
+  explicit `-GodotPath`, `GODOT_PATH`, then PATH discovery. Added gitignored `build-game.local.ps1`
+  for this machine's Godot path and documented host portability (Windows x64 remains the target).
+  Verified complete builds through the local wrapper on Windows PowerShell 5.1 and through
+  GODOT_PATH command resolution on PowerShell 7; checked missing-executable errors and Git ignore.
 - 2026-10-24 - v0.8: in multiplayer both farmers are on the farm: the visitor's farmer (`World.friend`,
   `Farmer.friend/home/pid`) lives in a hut with a mailbox placed when they first join, and goes home when they
   leave. Every player has a mailbox (flag up = cards waiting). Crop pictures: two-crop patterns, sometimes planned

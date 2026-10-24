@@ -94,9 +94,16 @@ generated in GDScript, so there are no asset files to download.
   .\build-game.ps1
   ```
 
-  The script imports resources and exports the game. It looks for the Godot 4.7.2 console executable
-  beside the project folder; use `-GodotPath 'D:\Tools\Godot_v4.7.2-stable_win64_console.exe'`
-  to select another location. It also works when called from another working directory.
+  The script imports resources and exports the game. It finds Godot using `-GodotPath`, then the
+  `GODOT_PATH` environment variable, then `godot4`, `godot` or `Godot` on `PATH`. The explicit
+  parameter and environment variable accept an executable path or command name. It works from
+  any working directory with Windows PowerShell 5.1 or PowerShell 7; on Linux or macOS, use
+  `pwsh ./build-game.ps1`. The export target remains Windows x64 on all hosts.
+
+  For a machine-specific setup, keep your executable path in `build-game.local.ps1` and run
+  `.\build-game.local.ps1`. That wrapper calls the shared script and is gitignored.
+  This machine's wrapper reuses existing Windows templates in `.godot/local-build/roaming/`
+  and temporarily points Godot there while building.
 
   Double-click `build/IdleFarm.exe` to play. This is a Windows x64 release build with the game
   data embedded: share just the `.exe`; players do not need Godot installed. Debug keys are disabled.
