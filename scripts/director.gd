@@ -38,8 +38,11 @@ func _process(delta: float) -> void:
 	if weather_t <= 0.0:
 		_next_weather()
 	event_t -= d
-	if event_t <= 0.0:
-		event_t = randf_range(30.0, 70.0) / (1.0 + Game.level() * 0.08)
+	if event_t <= 0.0 and Game.hushed():
+		event_t = Game.hush_after()   # due during a card's moment: wait it out, don't pile up
+	elif event_t <= 0.0:
+		# a calm farm by default: big things are rare, so a card's change stands out
+		event_t = randf_range(55.0, 110.0) / (1.0 + Game.level() * 0.05)
 		random_event()
 	if Game.weather == "storm":
 		bolt_t -= d
@@ -57,7 +60,17 @@ func _process(delta: float) -> void:
 
 # ---------------------------------------------------------------- weather
 func _next_weather() -> void:
-	var opts: Dictionary = WEATHER_NEXT.get(Game.weather, WEATHER_NEXT["sunny"])
+	var opts: Dictionary = WEATHER_NEXT.get(Game.weather, WEATHER_NEXT["sunny"]).duplicate()
+	if Game.has_edict("rain_covenant"):
+		opts.erase("heat")
+		if opts.has("storm"):
+			opts["storm"] = int(opts["storm"]) * 2
+	elif Game.has_edict("sun_covenant"):
+		opts.erase("rain")
+		opts.erase("storm")
+		opts["heat"] = int(opts.get("heat", 1)) * 2
+	if opts.is_empty():
+		opts = {"sunny": 1} if not Game.has_edict("rain_covenant") else {"cloudy": 1}
 	var total := 0
 	for k in opts:
 		total += int(opts[k])
@@ -192,10 +205,11 @@ func random_event(force: String = "") -> void:
 	var has_crops := world.crops.size() > 0
 	var ev := {}
 	if has_crops:
-		if not Game.has_relic("crow_crown") and not Game.buff("crow_truce"):
+		if not Game.has_relic("crow_crown") and not Game.buff("crow_truce") and not Game.has_edict("crow_pact"):
 			ev["crows"] = 10
 		ev["rabbits"] = 6
-	if (Game.is_evening() or Game.is_night()) and not Game.has_relic("lantern") and not Game.has_mutation("glow") and Game.day >= 2:
+	if (Game.is_evening() or Game.is_night()) and not Game.has_relic("lantern") and not Game.has_mutation("glow") and Game.day >= 2 \
+			and not Game.has_edict("hen_republic"):
 		ev["fox"] = 5
 	if lv >= 2 and not Game.buff("boar_guard"):
 		ev["boar"] = 3
@@ -204,7 +218,8 @@ func random_event(force: String = "") -> void:
 		ev["butterflies"] = 4
 	if world.cells_with_obj(["tree"] + Game.STRUCTS.keys()).size() > 0:
 		ev["wasps"] = 3
-	ev["weeds"] = 5 if world.cleared_ratio() > 0.7 else 1
+	if not Game.has_edict("tame_all"):
+		ev["weeds"] = 5 if world.cleared_ratio() > 0.7 else 1
 	if Game.inventory_count() > 0:
 		ev["merchant"] = 2
 	ev["lucky"] = 4 if Game.has_relic("black_cat") else 1
@@ -291,6 +306,8 @@ func run_event(id: String) -> void:
 				Game.add_log("Wasps built a nest near the %s." % _obj_name(h))
 		"weeds":
 			var cells2 := world.free_grass_cells()
+			if Game.has_edict("wild_reserve"):
+				cells2 = cells2.filter(world.in_reserve)
 			cells2.shuffle()
 			for i in mini(randi_range(2, 4), cells2.size()):
 				world.place_obj(cells2[i], "weed")

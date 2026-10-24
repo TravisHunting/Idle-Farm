@@ -52,7 +52,7 @@ func _ensure() -> void:
 	if not t.has("last"):
 		t["last"] = ""
 	if not t.has("cata_t"):
-		t["cata_t"] = Game.DAY_LENGTH * randf_range(1.5, 3.0)
+		t["cata_t"] = Game.DAY_LENGTH * randf_range(2.5, 4.0)
 	if not t.has("alive"):
 		t["alive"] = {}
 	if not t.has("extinct"):
@@ -72,10 +72,12 @@ func _process(delta: float) -> void:
 		_sample_t = SAMPLE_EVERY
 		_sample()
 	Game.tides["check_t"] = float(Game.tides["check_t"]) - d
-	if float(Game.tides["check_t"]) <= 0.0:
-		Game.tides["check_t"] = randf_range(200.0, 420.0)
+	if float(Game.tides["check_t"]) <= 0.0 and Game.hushed():
+		Game.tides["check_t"] = Game.hush_after()
+	elif float(Game.tides["check_t"]) <= 0.0:
+		Game.tides["check_t"] = randf_range(360.0, 660.0)
 		turn()
-	if Game.tides.get("silenced", false) and not Game.buff("silent_wild"):
+	if Game.tides.get("silenced", false) and not Game.buff("silent_wild") and not Game.has_edict("tame_all"):
 		# the silence ends: the wild floods back in from the edges
 		Game.tides["silenced"] = false
 		world.overgrow(18)
@@ -83,8 +85,10 @@ func _process(delta: float) -> void:
 		cards.apply([["trees", 2], ["spawn", "rabbit", 2], ["spawn", "crow", 2]])
 		Game.add_log("The silence breaks. Seeds blow in, burrows reopen: the wild is coming back.")
 	Game.tides["cata_t"] = float(Game.tides["cata_t"]) - d
-	if float(Game.tides["cata_t"]) <= 0.0:
-		Game.tides["cata_t"] = Game.DAY_LENGTH * randf_range(1.2, 2.6)
+	if float(Game.tides["cata_t"]) <= 0.0 and Game.hushed():
+		Game.tides["cata_t"] = Game.hush_after()
+	elif float(Game.tides["cata_t"]) <= 0.0:
+		Game.tides["cata_t"] = Game.DAY_LENGTH * randf_range(2.0, 3.5)
 		roll_cataclysm()
 
 
@@ -390,7 +394,7 @@ func turn() -> void:
 		else:
 			_bane(who)
 		Game.tides["last"] = "upheaval:" + who
-	elif randf() < 0.45:
+	elif randf() < 0.25:
 		var who2: String = FACTIONS.pick_random()
 		if randf() < 0.5:
 			_boon(who2)
@@ -437,7 +441,8 @@ func _boon(who: String) -> void:
 					Game.charms = mini(5, Game.charms + 2)
 					Game.add_log("THE TIDE TURNS: the farmer feels ten years younger.")
 		"wild":
-			match ["surge", "migration", "seedfall"].pick_random():
+			# the Tame It All edict: the wild can only come back as critters
+			match ("migration" if Game.has_edict("tame_all") else ["surge", "migration", "seedfall"].pick_random()):
 				"surge":
 					world.overgrow(18)
 					Game.add_log("THE TIDE TURNS: the wild surges back. Weeds and brambles everywhere!")

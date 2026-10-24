@@ -215,6 +215,7 @@ Autoload `Net` (`scripts/net.gd`), the same node path on both sides, so RPCs jus
   Missing actors are created from `kind`/`caste`; `gone` removes them.
 - FX: `World.puff/float_text`, `WeatherFx.strike/beam/meteor` and `main.shake` call `Net.fx()` (no-op unless
   hosting with a guest); the guest replays them. `director.shake` now connects to `main.shake` (no lambda).
+  A played card's moment goes out as `"spotlight"` (cells, title, label, colour) -> `hud.show_spotlight`.
 - `World.to_dict(with_actors)`, `World.load_grid(d)` / `load_actors(d)` (`from_dict` = both).
 - `main.back_to_menu`, `save_and_quit` and F5 call `Net.stop()` (no goodbye message yet: 2.5).
 - Measured (localhost, 21 actors, 15s steady): payload 23.7 KB/s, **wire 6.0 KB/s** (ZSTD), mostly the 1/s

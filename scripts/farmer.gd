@@ -516,7 +516,7 @@ func _choose() -> void:
 		cands.append([66 if tilled_n < 6 else 46, {"kind": "plan", "cell": me, "dur": 1.5}])
 
 	# overgrowth: field tiles first, then whatever is nearest the house
-	var debris: Array = world.reachable_debris(reach)
+	var debris: Array = world.reachable_debris(reach).filter(func(c: Vector2i) -> bool: return not world.in_reserve(c))
 	if debris.size() > 0:
 		var in_field: Array = []
 		for c in debris:
@@ -531,7 +531,7 @@ func _choose() -> void:
 			target = world.nearest(debris, door() if randf() < 0.6 else me)
 			# the wilder the farm, the more he wants it gone
 			score = 34.0 + 24.0 * (1.0 - world.cleared_ratio())
-		if Game.quirk == "tidy":
+		if Game.quirk == "tidy" or Game.has_edict("tame_all"):
 			score += 12.0
 		var tt: String = world.obj_type(target)
 		if tt in World.TREES:
@@ -589,7 +589,7 @@ func _choose() -> void:
 	if Game.item_count("wood") < 6:
 		var trees: Array = []
 		for c in world.cells_with_obj(World.TREES):
-			if _can_reach(c, reach) and not world.is_planned(c):
+			if _can_reach(c, reach) and not world.is_planned(c) and not world.in_reserve(c):
 				trees.append(c)
 		if trees.size() > 0:
 			cands.append([24, {"kind": "chop", "cell": world.nearest(trees, me), "adj": true, "dur": 4.0, "tool": "tool_axe"}])
@@ -686,7 +686,9 @@ func _pick_build() -> Dictionary:
 	var crops_n: int = world.crops.size()
 	for id in Game.STRUCTS:
 		var def: Dictionary = Game.STRUCTS[id]
-		if def["level"] > lv or world.count_obj(id) >= def["max"]:
+		if def["level"] > lv or def.get("card", false) or world.count_obj(id) >= def["max"]:
+			continue
+		if id == "scarecrow" and Game.has_edict("crow_pact"):
 			continue
 		if not Game.can_afford(def):
 			continue

@@ -53,6 +53,7 @@ func _run() -> void:
 	_reset_aliens()
 	_test_natural_run()
 	_test_multiplayer_prep()
+	_test_card_moments()
 	await _test_save_roundtrip()
 
 	_wipe()
@@ -77,6 +78,7 @@ func step(seconds: float) -> void:
 		main.swarm._process(STEP)
 		main.tides._process(STEP)
 		main.chores._process(STEP)
+		main.edicts._process(STEP)
 
 
 func check(ok: bool, what: String) -> void:
@@ -273,6 +275,7 @@ func _test_brood() -> void:
 	var sw: Swarm = main.swarm
 	var w: World = main.world
 	_reset_aliens()
+	Game.tides["cata_t"] = Game.DAY_LENGTH * 10.0   # no natural cataclysm mid-test (the cataclysm section rolls its own)
 	# wasps mutate into a queen who flies off to found a mound
 	main.director.spawn_animal("wasps", w.feet(Vector2i(6, 14)))
 	sw.arrive("")
@@ -338,7 +341,7 @@ func _test_brood() -> void:
 	Game.colony["matter"] = 80.0
 	step(300.0)
 	sw.change_rel(0.0, -100.0)
-	for i in 4:
+	for i in (4 if not sw.mounds().is_empty() else 0):
 		var m := Insect.new(w, "soldier", w.feet(sw.mounds()[0]))
 		m.hive = sw.mounds()[0]
 		w.add_animal(m)
@@ -406,6 +409,8 @@ func _test_cataclysms() -> void:
 	check(int(Game.tides["extinct"].size()) == 4, "all four extinctions were tracked (%s)" % str(Game.tides["extinct"]))
 	check(main.world.farmer != null and main.world.farmer.state != "", "the farmer survived the dark harvest")
 	# comebacks: the farmer breaks new ground, the wild returns when the silence ends
+	# (no natural cataclysm in the middle of it: they are days apart in play, but the clock can land here)
+	Game.tides["cata_t"] = Game.DAY_LENGTH * 10.0
 	step(Game.DAY_LENGTH)
 	check(t.alive("farm"), "the farm comes back (tilled %d)" % w.tilled_cells().size())
 	step(Game.DAY_LENGTH * 2.2)
@@ -692,6 +697,82 @@ func _frozen() -> PackedByteArray:
 const GUEST := "guest000000000ff"
 
 
+## A card's moment (spotlight + hush), every edict, and every choice in the deck applied once.
+## Leaves the Crow Pact in force for the save/load check.
+func _test_card_moments() -> void:
+	print("== card moments & edicts")
+	var w: World = main.world
+	var lit: Array = []
+	main.cards.spotlight.connect(func(cells: Array, _t: String, _l: String, _c: Color) -> void: lit.append(cells.size()))
+	Game.hush_t = 0.0
+	main.cards.play_out([["clear", 6], ["build", "bench", 1]], "TEST", "Clear", Color.WHITE)
+	check(lit.size() == 1 and int(lit[0]) > 0, "a played card lights up the tiles it changed (%s)" % str(lit))
+	check(Game.hushed(), "the farm holds its breath after a card")
+	main.director.event_t = 0.0
+	var turn_t: float = Game.tides["check_t"]
+	Game.tides["check_t"] = 0.0
+	step(10.0)
+	# both were put off to just after the hush (Game.hush_after), not fired (a turn would reset to 360s+)
+	var ev_t: float = main.director.event_t
+	var turn_due: float = Game.tides["check_t"]
+	check(turn_due < Game.hush_t + 41.0, "no turn of fate during the hush")
+	check(ev_t > Game.hush_t and ev_t < Game.hush_t + 41.0 and turn_due > Game.hush_t, "what came due waits until after the hush")
+	Game.tides["check_t"] = turn_t
+	main.cards.play_out([["mood", 5]], "TEST", "Mood", Color.WHITE)
+	check(lit.size() == 2 and int(lit[1]) > 0, "a card that changes nothing on the ground still gets its moment")
+	Game.hush_t = 0.0
+
+	# every edict: laid down, replaces its rival, does its daily thing
+	main.cards.apply([["plant", "turnip", 8]])
+	for id in Game.EDICTS:
+		main.cards.apply([["edict", id]])
+		var rival: String = Game.EDICTS[id]["rival"]
+		check(Game.has_edict(id) and not Game.has_edict(rival), "edict %s in force, %s not" % [id, rival])
+		main.edicts._dawn(id)
+		main.edicts._enforce()
+		match id:
+			"rain_covenant":
+				check(Game.weather == "rain", "the Rain Covenant brings rain")
+			"wild_reserve":
+				var farmed := 0
+				for c in w.tilled_cells():
+					if w.in_reserve(c):
+						farmed += 1
+				check(farmed == 0 and not w._field_ok(Vector2i(3, World.ROWS - 2)), "the wild reserve has no fields")
+			"tame_all":
+				check(w.cells_with_obj(World.TREES).is_empty(), "Tame It All fells every tree")
+				check(not w.in_reserve(Vector2i(3, World.ROWS - 2)), "the reserve is gone with its edict")
+			"side_aliens":
+				check(main.colony.rel() >= 45.0, "the pact with the stars holds alien relations up")
+			"side_brood":
+				check(main.swarm.rel_farm() >= 45.0 and main.colony.rel() <= -35.0, "the pact with the brood turns the aliens")
+			"crow_pact":
+				check(w.count_obj("scarecrow") == 0, "the Crow Pact takes the scarecrows down")
+			"hen_republic":
+				check(w.count_animals("chicken") >= 3 and w.count_obj("coop") == 1, "the Hen Republic has a coop and hens")
+		step(5.0)
+	check(Game.edicts.size() == 4, "one edict per rival pair (%s)" % str(Game.edicts.keys()))
+	while not Game.edicts.is_empty():
+		main.cards.apply([["lose_edict", ""]])
+	check(Game.edicts.is_empty(), "edicts can be broken")
+	step(Game.DAY_LENGTH)   # a day with no edicts
+
+	# every choice in the deck, once (costs and rescaled effects included)
+	var cards_n := 0
+	for c in Deck.CARDS:
+		check(Art.has(c["art"]), "card %s has art %s" % [c["id"], c["art"]])
+		for which in ["a", "b"]:
+			for r in c[which].get("req", []) + c.get("needs", []):
+				main.cards.check(r)
+			main.cards.play_out(c[which]["fx"], c["title"], c[which]["label"], Color.WHITE)
+			cards_n += 1
+		step(2.0)
+	check(cards_n == Deck.CARDS.size() * 2, "every card choice applied (%d)" % cards_n)
+	Game.hush_t = 0.0
+	Game.edicts = {}
+	main.cards.apply([["edict", "crow_pact"]])
+
+
 func _test_save_roundtrip() -> void:
 	print("== save/load")
 	var guest_stash := Game.card_at("stash", 1, GUEST)
@@ -728,7 +809,7 @@ func _test_save_roundtrip() -> void:
 		n, land, bld, int(rel), n2, main.colony.land_size(), main.colony.building_count(), int(main.colony.rel())])
 	check(n2 >= n - 1, "aliens survive a reload (%d -> %d)" % [n, n2])
 	check(main.colony.land_size() == land, "the creep survives a reload")
-	check(main.colony.building_count() == bld, "alien buildings survive a reload")
+	check(main.colony.building_count() == bld, "alien buildings survive a reload (%d -> %d)" % [bld, main.colony.building_count()])
 	print("   brood before: %d insects, %d tunnels, %d mounds | after: %d, %d, %d" % [nb, tun, mnd, bugs().size(),
 		main.world.insect_land.size(), main.swarm.mounds().size()])
 	check(bugs().size() >= nb - 1, "insects survive a reload")
@@ -739,7 +820,8 @@ func _test_save_roundtrip() -> void:
 	check(main.world.farmer.uid == fuid, "the farmer's id survives a reload")
 	var fr: Farmer = main.world.friend
 	check(fr != null and fr.pid == GUEST and fr.state == "away" and fr.home.x >= 0, "the visitor's farmer and hut survive a reload")
-	check(_pictures() == art_n, "crop pictures survive a reload (%d)" % art_n)
+	check(_pictures() == art_n, "crop pictures survive a reload (%d -> %d)" % [art_n, _pictures()])
+	check(Game.has_edict("crow_pact"), "edicts survive a reload")
 	var kept := 0
 	for a in main.world.animals:
 		if auids.has(a.uid):

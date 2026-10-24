@@ -261,7 +261,8 @@ func tick(dt: float) -> void:
 	_grow_moss(dt)
 	_update_relations(dt)
 	_update_era(pop)
-	_outreach(dt)
+	if not Game.hushed():
+		_outreach(dt)
 	_age_husks(dt)
 	_the_call(dt, pop)
 	changed.emit()
@@ -963,7 +964,10 @@ func _update_land(dt: float, mem: Array) -> void:
 	var claim := claimed()
 	# spread
 	var steps := int(ceilf(dt / 2.0)) * (2 if era() == "expanding" else 1)
-	if not mem.is_empty():
+	# the creep moves slowly: a border that crawls reads as a border, not as flicker
+	if randf() > 0.4:
+		steps = 0
+	if not mem.is_empty() and steps > 0:
 		var front: Array = []
 		for c in claim:
 			if world.alien_land.has(c) or world.is_water(c):
@@ -982,7 +986,7 @@ func _update_land(dt: float, mem: Array) -> void:
 	for c in world.alien_land.keys():
 		if gone >= steps + (2 if mem.is_empty() else 0):
 			break
-		if not claim.has(c) and randf() < 0.5:
+		if not claim.has(c) and randf() < 0.25:
 			world.alien_land.erase(c)
 			gone += 1
 

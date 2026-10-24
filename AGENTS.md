@@ -16,6 +16,9 @@ server is reserved for occasional, deliberate passes (it costs a lot of tokens).
   `"C:/Dev/Godot/Godot_v4.7.2-stable_win64.exe" --headless --path . -s tests/sim_test.gd`
   They boot the real game tree on a throwaway save slot, fast-forward days of simulation and
   print a report; a non-zero exit code / `SCRIPT ERROR` / `FAIL` lines mean something broke.
+  A few faction checks are flaky; to tell flaky from broken, run several copies at once with
+  `-- profile=N` (own save slots), e.g. profiles 2-7. `tests/impact_test.gd` audits how much a card
+  changes vs. the farm's own churn (run it after deck or balance changes).
 - In `-s` mode the entry script compiles before the autoloads exist, so each `tests/*.gd` entry
   point only loads a `*_runner.gd` Node at runtime; put test logic in the runner.
 - After adding a new `class_name` script, run `--headless --path . --import` once (refreshes the

@@ -347,7 +347,8 @@ func _refused(why: String) -> void:
 	_set_status(why)
 
 
-## Called by the game for one-shot visuals ("puff", "float", "strike", "beam", "meteor", "shake").
+## Called by the game for one-shot visuals ("puff", "float", "strike", "beam", "meteor", "shake",
+## "spotlight" = a played card's moment, see cards.play_out).
 func fx(kind: String, args: Array) -> void:
 	if live_host() and _fx.size() < 200:
 		_fx.append([kind, args])
@@ -618,6 +619,9 @@ func _replay(kind: String, args: Array) -> void:
 				main.weather_fx.callv(kind, args)
 		"shake":
 			main.shake(float(args[0]))
+		"spotlight":
+			if main.hud:
+				main.hud.callv("show_spotlight", args)
 
 
 ## Guest: send an action to the host.

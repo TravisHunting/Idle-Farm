@@ -6,6 +6,8 @@ extends Node
 ## choose(where, slot, "a") where `where` is "box" or "stash".
 
 signal chosen(card_id: String, which: String)
+## A played card's moment (hud.gd): the tiles it changed light up while the rest of the farm dims.
+signal spotlight(cells: Array, title: String, label: String, color: Color)
 
 const RARITY_WEIGHT := {1: 10.0, 2: 5.0, 3: 2.5, 4: 1.2}
 const RARITY_NAMES := {0: "Fate", 1: "Common", 2: "Uncommon", 3: "Rare", 4: "Legendary"}
@@ -26,6 +28,7 @@ const TOTEM_SPOTS := [Vector2i(-1, -1), Vector2i(1, -1), Vector2i(-2, 0), Vector
 
 var world: World
 var director: Node
+var edicts: Edicts
 var _by_id := {}
 var _ensure_t := 0.0
 var _whisper_t := 60.0
@@ -238,6 +241,13 @@ func check(r: Array) -> Array:
 		"water":
 			var wn: int = world.ground.count(World.G_WATER)
 			return [wn >= int(r[1]), "%d tiles of water (%d)" % [r[1], wn]]
+		# ---- edicts (edicts.gd)
+		"edict":
+			return [Game.has_edict(r[1]), "the %s in force" % Game.EDICTS[r[1]]["name"]]
+		"no_edict":
+			return [not Game.has_edict(r[1]), "no %s" % Game.EDICTS[r[1]]["name"]]
+		"edicts":
+			return [Game.edicts.size() >= int(r[1]), "%d edict%s in force (%d)" % [r[1], "" if int(r[1]) == 1 else "s", Game.edicts.size()]]
 	return [true, ""]
 
 
@@ -306,11 +316,37 @@ func choose(where: String, i: int, which: String, pid: String = "") -> bool:
 			if k > 0:
 				v.tint = [Color("f7c6a0"), Color("f19ec2"), Color("a7f070"), Color("73eff7")][k % 4]
 	Game.acting_pid = pid
-	apply(ch.get("fx", []))
+	play_out(ch.get("fx", []), c["title"], ch["label"], RARITY_COLORS.get(int(c.get("rarity", 1)), Color.WHITE))
 	Game.acting_pid = ""
-	world.prune_fields()
 	chosen.emit(id, which)
 	return true
+
+
+## Applies a card's effects as a moment of its own: the background holds its breath (Game.hush_t)
+## and the tiles the card changed are put in the spotlight (HUD), so the change reads as the
+## card's doing and not as one more thing among the farm's usual bustle.
+func play_out(fx: Array, title: String, label: String, color: Color) -> void:
+	var before := world.signature()
+	var uids := {}
+	for a in world.animals:
+		uids[a.uid] = true
+	apply(fx)
+	world.prune_fields()
+	var cells: Array = world.changed_cells(before, world.signature())
+	for a in world.animals:
+		if not uids.has(a.uid) and not a.dead:
+			var ac := Vector2i(floori(a.pos.x / World.T), floori((a.pos.y - 4.0) / World.T))
+			if world.in_bounds(ac) and not ac in cells:
+				cells.append(ac)
+	if cells.is_empty() and world.farmer:
+		# nothing on the ground changed (an ability, a friend, a relic...): the farmer is the news
+		var fc := world.farmer.cell()
+		for d in [Vector2i.ZERO] + World.DIRS:
+			if world.in_bounds(fc + d):
+				cells.append(fc + d)
+	Game.hush_t = Game.HUSH_SECONDS
+	Net.fx("spotlight", [cells, title, label, color])
+	spotlight.emit(cells, title, label, color)
 
 
 # ---------------------------------------------------------------- effects
@@ -555,6 +591,15 @@ func _apply_one(e: Array) -> void:
 			_alien_fx(e)
 		"brood":
 			_brood_fx(e)
+		"edict":
+			if edicts:
+				edicts.enact(String(e[1]))
+		"lose_edict":
+			if edicts:
+				if String(e[1]) == "":
+					edicts.revoke_random()
+				else:
+					edicts.revoke(String(e[1]))
 
 
 ## ["alien", op, arg]: steer the alien colony (colony.gd).
@@ -958,7 +1003,8 @@ func _process(delta: float) -> void:
 			if String(p.get("note", "")) != "":
 				Game.add_log(p["note"])
 			Game.acting_pid = String(p.get("pid", ""))
-			apply(p["fx"])
+			# a consequence coming due is a card's moment too
+			play_out(p["fx"], "A CONSEQUENCE", String(p.get("note", "")), RARITY_COLORS[0])
 			Game.acting_pid = ""
 	# dawn: bone flute, friends
 	if _last_tod < 0.25 and Game.time_of_day >= 0.25:

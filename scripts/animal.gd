@@ -162,6 +162,13 @@ func _dog_near(dist: float) -> bool:
 	return false
 
 
+func _crow_near(dist: float) -> bool:
+	for a in world.animals:
+		if a.kind == "crow" and not a.dead and a.pos.distance_to(pos) < dist:
+			return true
+	return false
+
+
 ## Moves towards p; returns true when there.
 func _move(p: Vector2, d: float, spd: float = -1.0) -> bool:
 	var v := p - pos
@@ -229,6 +236,10 @@ func _update_pest(d: float) -> void:
 		say("!", 1.0)
 		scare()
 		return
+	if kind == "rabbit" and Game.has_edict("crow_pact") and _crow_near(24.0):
+		say("!", 1.0)
+		scare()   # the Crow Pact: the crows chase rabbits off the rows
+		return
 	if target == null or not world.crops.has(target) or world.crops[target].get("dead", false):
 		target = _random_crop()
 		state = "enter"
@@ -244,6 +255,8 @@ func _update_pest(d: float) -> void:
 		timer += d
 		if timer > 2.5:
 			timer = 0.0
+			if kind == "crow" and Game.has_edict("crow_pact"):
+				return   # sworn crows only stand guard
 			world.damage_crop(target, 0.06, 9.0)
 			world.puff(world.feet(target) + Vector2(0, -4), Color("a7f070"), 3, 10.0)
 

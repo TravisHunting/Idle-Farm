@@ -44,19 +44,20 @@ const ITEM_NAMES := {"egg": "egg", "ore": "ore", "wood": "wood", "stone": "stone
 ## Things the farmer builds by himself. solid = blocks walking. movable = can be rearranged.
 ## mats = building materials (from clearing the overgrowth) it takes to build one. There is no
 ## money: buildings only ever cost materials.
-## relic = only appears through cards (level 99 so he never builds it).
+## card = only a card puts it on the farm (he never builds one himself): when a well, a coop or a
+## lightning rod is there, a choice put it there. relic = card-only too (level 99, never wiped).
 const STRUCTS := {
 	"fence":     {"name": "fence",     "mats": {"wood": 1}, "level": 1, "max": 40, "solid": true,  "movable": false, "hp": 60},
 	"scarecrow": {"name": "scarecrow", "mats": {"wood": 2}, "level": 1, "max": 3,  "solid": true,  "movable": true,  "hp": 80},
 	"flowerbed": {"name": "flower bed", "mats": {}, "level": 1, "max": 6,  "solid": false, "movable": true,  "hp": 40},
 	"bench":     {"name": "bench",     "mats": {"wood": 3}, "level": 1, "max": 2,  "solid": true,  "movable": true,  "hp": 60},
 	"sign":      {"name": "farm sign", "mats": {"wood": 2}, "level": 1, "max": 1,  "solid": true,  "movable": true,  "hp": 50},
-	"compost":   {"name": "compost heap", "mats": {"wood": 4}, "level": 1, "max": 1, "solid": true, "movable": false, "hp": 60},
-	"well":      {"name": "well",      "mats": {"stone": 8}, "level": 2, "max": 1,  "solid": true,  "movable": false, "hp": 200},
-	"lamp":      {"name": "lamp post", "mats": {"stone": 3, "wood": 2}, "level": 2, "max": 3,  "solid": true,  "movable": true,  "hp": 80},
-	"coop":      {"name": "chicken coop", "mats": {"wood": 10}, "level": 2, "max": 1, "solid": true, "movable": false, "hp": 150},
-	"beehive":   {"name": "beehive",   "mats": {"wood": 5}, "level": 3, "max": 2,  "solid": true,  "movable": true,  "hp": 60},
-	"rod":       {"name": "lightning rod", "mats": {"stone": 6, "wood": 2}, "level": 3, "max": 1, "solid": true, "movable": false, "hp": 999},
+	"compost":   {"name": "compost heap", "mats": {"wood": 4}, "level": 1, "card": true, "max": 1, "solid": true, "movable": false, "hp": 60},
+	"well":      {"name": "well",      "mats": {"stone": 8}, "level": 2, "card": true, "max": 1,  "solid": true,  "movable": false, "hp": 200},
+	"lamp":      {"name": "lamp post", "mats": {"stone": 3, "wood": 2}, "level": 2, "card": true, "max": 3,  "solid": true,  "movable": true,  "hp": 80},
+	"coop":      {"name": "chicken coop", "mats": {"wood": 10}, "level": 2, "card": true, "max": 1, "solid": true, "movable": false, "hp": 150},
+	"beehive":   {"name": "beehive",   "mats": {"wood": 5}, "level": 3, "card": true, "max": 2,  "solid": true,  "movable": true,  "hp": 60},
+	"rod":       {"name": "lightning rod", "mats": {"stone": 6, "wood": 2}, "level": 3, "card": true, "max": 1, "solid": true, "movable": false, "hp": 999},
 	"altar":     {"name": "dark altar", "level": 99, "max": 1, "solid": true, "movable": false, "hp": 999},
 	"totem":     {"name": "dark totem", "level": 99, "max": 6, "solid": true, "movable": false, "hp": 999},
 	"idol":      {"name": "stone idol", "level": 99, "max": 1, "solid": true, "movable": false, "hp": 999},
@@ -211,6 +212,30 @@ const RICH_LINES := [
 
 const TOTEMS_MAX := 6
 
+## Edicts: lasting rules a card lays down over the farm (edicts.gd). They keep steering the
+## simulation every day, and whenever one kicks in the log and the farmer name it.
+## rival = the edict it replaces (the other side of the same card). lines = what the farmer says.
+const EDICTS := {
+	"rain_covenant": {"name": "Rain Covenant", "rival": "sun_covenant", "desc": "Rain every dawn. No heatwaves, more storms.",
+		"lines": ["Rain at dawn again. The covenant holds.", "Never a dry morning since the covenant."]},
+	"sun_covenant": {"name": "Sun Covenant", "rival": "rain_covenant", "desc": "Blazing sun every morning. No rain, ever.",
+		"lines": ["Not a cloud. Not one, since the covenant.", "Sun again! I'll fetch the watering can."]},
+	"wild_reserve": {"name": "Wild Reserve", "rival": "tame_all", "desc": "The south of the farm belongs to the wild.",
+		"lines": ["I leave the south alone. That was the deal.", "The reserve is thick as a jungle now."]},
+	"tame_all": {"name": "Tame It All", "rival": "wild_reserve", "desc": "No weed ever grows back. Every tree came down.",
+		"lines": ["Not a weed since we tamed it all.", "Miss the apple trees, a bit."]},
+	"side_aliens": {"name": "Pact with the Stars", "rival": "side_brood", "desc": "The aliens are friends. The brood are not.",
+		"lines": ["The aliens wave at me now. The bugs glare.", "Our friends from the stars, eh?"]},
+	"side_brood": {"name": "Pact with the Brood", "rival": "side_aliens", "desc": "The brood are friends. The aliens are not.",
+		"lines": ["The ants bring honey since the pact.", "We stand with the bugs. Weird, but we do."]},
+	"crow_pact": {"name": "Crow Pact", "rival": "hen_republic", "desc": "Crows guard the crops. They take a trinket a day.",
+		"lines": ["The crows guard my rows now.", "Another button for the crows. Fair's fair."]},
+	"hen_republic": {"name": "Hen Republic", "rival": "crow_pact", "desc": "A new hen every dawn. No foxes. Hens peck seedlings.",
+		"lines": ["Long live the hens!", "So many hens. So few seedlings."]},
+}
+## How long the background holds its breath after a card is played (no random events, no turns of fate).
+const HUSH_SECONDS := 45.0
+
 const WEATHER_NAMES := {"sunny": "Sunny", "cloudy": "Cloudy", "rain": "Rain", "storm": "Storm", "heat": "Heatwave"}
 
 var running := false     # false while the welcome screen is up
@@ -265,6 +290,8 @@ var mutations := {}      # id -> true (see MUTATIONS)
 var tides := {}          # faction balance history + timers (tides.gd)
 var brood := {}          # the mutant insects' state (swarm.gd)
 var chores := {}         # grandpa's letter of starter chores (chores.gd)
+var edicts := {}         # id -> {day}: lasting rules laid down by cards (see EDICTS, edicts.gd)
+var hush_t := 0.0        # seconds the background stays quiet after a card was played (not saved)
 var settings := {"dock": "right", "card_minutes": DEFAULT_CARD_MINUTES, "speed": 1}
 var time_scale := 1.0    # game speed (fast forward), from settings["speed"]
 var profile := ""        # "" or "_p2".. (`-- profile=N`): separate settings + slots, for two copies on one PC
@@ -314,6 +341,8 @@ func reset() -> void:
 	tides = {}
 	brood = {}
 	chores = {}
+	edicts = {}
+	hush_t = 0.0
 
 
 func _process(delta: float) -> void:
@@ -325,6 +354,7 @@ func _process(delta: float) -> void:
 		return
 	var d := delta * time_scale
 	play_seconds += delta
+	hush_t = maxf(0.0, hush_t - d)
 	var prev := time_of_day
 	time_of_day += d / DAY_LENGTH
 	if time_of_day >= 1.0:
@@ -726,6 +756,22 @@ func has_mutation(id: String) -> bool:
 	return mutations.has(id)
 
 
+func has_edict(id: String) -> bool:
+	return edicts.has(id)
+
+
+## True while the farm holds its breath after a card (random events, turns of fate and faction
+## outreach wait until it's over, so the card's change is the only thing happening).
+func hushed() -> bool:
+	return hush_t > 0.0
+
+
+## When a timer that came due during the hush should go off instead: after it, staggered, so
+## everything held back doesn't land in the same second.
+func hush_after() -> float:
+	return hush_t + randf_range(8.0, 40.0)
+
+
 # ---------------------------------------------------------------- misc
 func add_log(text: String) -> void:
 	log_lines.append(text)
@@ -786,7 +832,7 @@ func to_dict() -> Dictionary:
 		"mood": mood, "poison": poison, "stats": stats, "log": log_lines, "weird": weird,
 		"relics": relics, "unlocked": unlocked, "favor_crop": favor_crop, "pending": pending,
 		"seen": seen, "play_seconds": play_seconds,
-		"colony": colony, "mutations": mutations, "tides": tides, "brood": brood, "chores": chores,
+		"colony": colony, "mutations": mutations, "tides": tides, "brood": brood, "chores": chores, "edicts": edicts,
 		"world_id": world_id, "forked_from": forked_from,
 	}
 
@@ -811,7 +857,12 @@ func from_dict(d: Dictionary) -> void:
 	tides = d.get("tides", {})
 	brood = d.get("brood", {})
 	chores = d.get("chores", {})
-	day = int(d.get("day", day))
+	edicts = {}
+	var ed: Dictionary = d.get("edicts", {})
+	for k in ed:
+		if EDICTS.has(k):
+			edicts[k] = ed[k]
+	day =int(d.get("day", day))
 	time_of_day = float(d.get("time_of_day", time_of_day))
 	weather = String(d.get("weather", weather))
 	owner_pid = String(d.get("owner_pid", ""))

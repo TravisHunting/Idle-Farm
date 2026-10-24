@@ -27,8 +27,8 @@ const MOUND_HP := {1: 120, 2: 220, 3: 360}
 const QUEEN_NAMES := ["Bzzara", "Klikka", "Thraxa", "Vespera", "Mandibla", "Chitinna", "Skrrix", "Mothra", "Antheia", "Zizzle"]
 const FOOD_PER_ADULT := 1.0 / 150.0
 const MAX_WATER := 48
-const MAX_WEBS := 16
-const BARE_TIME := 900.0
+const MAX_WEBS := 10
+const BARE_TIME := 1800.0
 const MAX_POP := 40          # everything alive, eggs included
 const MAX_MOUNDS := 6
 const MAX_QUEENS := 4
@@ -222,9 +222,10 @@ func tick(dt: float) -> void:
 	_critters(dt, mem)
 	_war(dt)
 	_relations(dt)
-	_swarming(dt, pop)
+	if not Game.hushed():
+		_swarming(dt, pop)
+		_outreach(dt)
 	_nuptials(dt, pop)
-	_outreach(dt)
 	_age_webs(dt)
 
 
@@ -409,7 +410,7 @@ func _abandoned(dt: float) -> void:
 				world.remove_obj(m)
 				world.place_obj(m, "i_hole", {"t": 600.0})
 	for c in world.insect_land.keys():
-		if randf() < dt * 0.02:
+		if randf() < dt * 0.004:   # slowly: an empty warren stays a while, as a scar
 			world.insect_land.erase(c)
 
 
@@ -571,9 +572,9 @@ func worker_job(a: Insect) -> Variant:
 		var wall: Variant = _comb_spot()
 		if wall != null:
 			return {"kind": "comb", "cell": wall, "t": 4.0}
-	var dig: Variant = _dig_spot(me)
+	var dig: Variant = _dig_spot(me) if randf() < 0.4 else null
 	if dig != null:
-		return {"kind": "dig", "cell": dig, "t": 2.5}
+		return {"kind": "dig", "cell": dig, "t": 5.0}
 	return _forage_job(me)
 
 
@@ -775,9 +776,9 @@ func _update_land(dt: float) -> void:
 	var claim := claimed()
 	var gone := 0
 	for c in world.insect_land.keys():
-		if gone >= 2:
+		if gone >= 1:
 			break
-		if not claim.has(c) and randf() < dt * 0.1:
+		if not claim.has(c) and randf() < dt * 0.03:
 			world.insect_land.erase(c)
 			gone += 1
 
@@ -879,7 +880,7 @@ func web_spot(a: Insect) -> Variant:
 func spin(c: Vector2i) -> void:
 	if not _can_wall(c) or world.count_obj("i_web") >= MAX_WEBS:
 		return
-	world.place_obj(c, "i_web", {"t": randf_range(700.0, 1300.0), "hp": 20})
+	world.place_obj(c, "i_web", {"t": randf_range(1400.0, 2400.0), "hp": 20})
 	world.puff(world.center(c), Color("f4f4f4"), 4, 8.0)
 
 
@@ -1011,8 +1012,10 @@ func _war(dt: float) -> void:
 				front.append([c, c + d])
 	front.shuffle()
 	var flips := 0
+	# the front line advances a tile at a time, now and then: a war you can follow, not a flicker
+	var max_flips := int(ceilf(dt / 2.0)) if randf() < 0.3 else 0
 	for pair in front:
-		if flips >= int(ceilf(dt / 2.0)):
+		if flips >= max_flips:
 			break
 		var mine: Vector2i = pair[0]
 		var theirs: Vector2i = pair[1]
@@ -1145,7 +1148,7 @@ func _swarming(dt: float, pop: int) -> void:
 	b["swarm_t"] = float(b["swarm_t"]) - dt
 	if float(b["swarm_t"]) > 0.0:
 		return
-	b["swarm_t"] = randf_range(300.0, 700.0)
+	b["swarm_t"] = randf_range(600.0, 1100.0)
 	var locusts := count_caste("locust")
 	if locusts >= 3 and (float(b["food"]) < pop * 1.5 or randf() < 0.25):
 		launch_swarm("")

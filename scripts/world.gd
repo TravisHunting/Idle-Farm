@@ -646,9 +646,17 @@ func is_planned(c: Vector2i) -> bool:
 func _field_ok(c: Vector2i) -> bool:
 	if not in_bounds(c) or is_house(c) or is_doorstep(c) or c == BIN or c == BIN_FRONT:
 		return false
-	if ground[idx(c)] != G_GRASS or crops.has(c) or alien_land.has(c) or insect_land.has(c):
+	if ground[idx(c)] != G_GRASS or crops.has(c) or alien_land.has(c) or insect_land.has(c) or in_reserve(c):
 		return false
 	return not objs.has(c) or is_clearable(c)
+
+
+## The Wild Reserve edict: the south rows belong to the wild (no fields, the farmer keeps out).
+const RESERVE_ROWS := 6
+
+
+func in_reserve(c: Vector2i) -> bool:
+	return c.y >= ROWS - RESERVE_ROWS and Game.has_edict("wild_reserve")
 
 
 ## Planned field cells that still need work: [cells to till now, cells still overgrown].
@@ -1302,8 +1310,10 @@ func _simulate(d: float) -> void:
 			remove_obj(ash.pick_random())
 		# after a scorching the wild floods back for a day ("wild_return")
 		var surge := Game.buff("wild_return")
-		if (randf() < 0.3 or surge) and cells_with_obj(DEBRIS).size() < 60 and not Game.buff("silent_wild"):
+		if (randf() < 0.2 or surge) and cells_with_obj(DEBRIS).size() < 60 and not Game.buff("silent_wild") and not Game.has_edict("tame_all"):
 			var cells := free_grass_cells().filter(func(c: Vector2i) -> bool: return not bare.has(c))
+			if Game.has_edict("wild_reserve"):
+				cells = cells.filter(in_reserve)   # the wild keeps to its reserve
 			for i in (4 if surge else 1):
 				if cells.size() > 0:
 					place_obj(cells.pick_random(), ["weed", "tallgrass", "bush", "bramble"].pick_random() if surge else ("weed" if randf() < 0.7 else "tallgrass"))
@@ -1412,6 +1422,32 @@ func puff(p: Vector2, c: Color, n: int = 6, speed: float = 18.0, up: float = 10.
 		var a := randf() * TAU
 		particles.append({"p": p, "v": Vector2(cos(a), sin(a)) * randf_range(0.3, 1.0) * speed + Vector2(0, -up),
 			"life": randf_range(0.4, 0.9), "c": c})
+
+
+## One string per tile with everything a player can see change there (ground, object, crop kind or
+## death, creep, tunnels, bare dirt; not growth or wetness). Two of these diffed = what changed:
+## the card spotlight (cards.gd) and the impact audit (tests/impact_runner.gd) both use it.
+func signature() -> PackedStringArray:
+	var out := PackedStringArray()
+	for y in ROWS:
+		for x in COLS:
+			var c := Vector2i(x, y)
+			var cr: Dictionary = crops.get(c, {})
+			var crop := ""
+			if not cr.is_empty():
+				crop = String(cr["type"]) + ("x" if cr.get("dead", false) else "")
+			out.append("%d|%s|%s|%d%d%d" % [ground[idx(c)], obj_type(c), crop,
+				int(alien_land.has(c)), int(insect_land.has(c)), int(bare.has(c))])
+	return out
+
+
+## Cells whose signature differs between two signature() snapshots.
+func changed_cells(before: PackedStringArray, after: PackedStringArray) -> Array:
+	var out: Array = []
+	for i in mini(before.size(), after.size()):
+		if before[i] != after[i]:
+			out.append(Vector2i(i % COLS, i / COLS))
+	return out
 
 
 func float_text(text: String, p: Vector2, c: Color = Color("ffcd75")) -> void:

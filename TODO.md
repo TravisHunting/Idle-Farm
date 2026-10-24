@@ -92,6 +92,10 @@ changed drastically and lose territory). Four factions compete for the 12x22 far
   in-game days and a save/reload, prints a faction report every 12 in-game hours and exits
   non-zero on failure (~25s per 8 days). After adding a new `class_name` script, run
   `--headless --path . --import` once to refresh the global class cache.
+- **Card impact audit:** `--headless --path . -s tests/impact_test.gd -- trials=40 [seed=N] [profile=N] [verbose]`
+  plays random deck choices on a warmed-up farm and prints how many tiles each changes vs. what the rest
+  of the farm changes on its own (in the 45s hush and over 5 minutes), what makes up that ambient churn,
+  the weakest/strongest choices, and how many choices carry a real cost. Use it after deck or churn changes.
 - **Multiplayer test:** `bash tests/run_net_test.sh` runs two headless copies on localhost (~50s): join,
   play, host leaves, guest keeps a fork, roles swap, rejoin. `bash tests/run_click_test.sh` (~25s) does the
   same flow through the real UI with synthetic clicks and keys (profiles 4 and 5). Windowed screenshots:
@@ -133,7 +137,9 @@ changed drastically and lose territory). Four factions compete for the 12x22 far
 | `scripts/swarm.gd` (class **Swarm**) | The Brood: radiation + arrivals, castes on emergence, food (fungus gardens, nectar, grazing, raids, swarms), eggs, mounds + build sites, tunnels, sinkholes, bare ground, webs, war fronts with the aliens, two-way relations, outreach, `boon()`/`bane()`. State in `Game.brood`. |
 | `scripts/insect.gd` (class **Insect** extends Animal) | One insect: caste behaviour (egg, grub, pupa, worker, soldier, locust, spinner, glowfly, queen, migrant), swarm/flight routes, glow variants, drawing. |
 | `scripts/art_insect.gd` | ASCII sprites for every insect caste (2 frames + glowing variants), queen, eggs, grubs, cocoon, mounds x3, web, wax wall, hole, husk, cordyceps, icons, treasures. |
+| `scripts/edicts.gd` (class **Edicts**) | Lasting card rules in rival pairs (`Game.EDICTS`: rain/sun covenant, wild reserve/tame it all, pact with the stars/brood, crow pact/hen republic): immediate effect, a dawn effect, relations held in place, log lines naming the edict. Other scripts check `Game.has_edict(id)`. State in `Game.edicts`. |
 | `tests/sim_test.gd` + `tests/sim_runner.gd` | Headless simulation test (see How to run). |
+| `tests/impact_test.gd` + `tests/impact_runner.gd` | Card impact audit: card tiles vs. ambient churn, cost coverage (see How to run). |
 | `scripts/hud.gd` | In-game UI: top bar (coins/day/clock/weather, drag, menu/dock/min/close), status strip (HP/energy/mood/weirdness eye/buffs/activity/log), card tray (rarity borders, playable pip, OPEN ALL, relic shelf with tooltips), **choice-card modal**, speech bubbles & floating texts. |
 
 Logical resolution 192x432 (viewport stretch, integer scale, nearest filter). Layout:
@@ -311,6 +317,22 @@ Key systems added in v0.3:
 - [ ] Played by a person for feel (pace of the first 10 minutes; whether chores are too fast/slow)
 - [ ] Hut art is a first pass; the hut is one tile (the farmhouse is 2x2)
 
+### v0.9: cards that matter (the player is an unseen overseer: nothing credits "you")
+- [x] The card's moment: the farm dims, the changed tiles flash and glow outward from the middle of the
+  change, a banner names the card and choice (on the half of the farm away from it), a code-made chime;
+  delayed consequences get one too; replayed on the guest (`"spotlight"` fx)
+- [x] The hush: 45s after a card, no random events, turns of the tides, cataclysms or faction outreach;
+  whatever came due waits until just after it, staggered (`Game.hush_after()`), so nothing piles up
+- [x] Less background churn: slower events, tides, cataclysms, creep, tunnels, webs, war fronts, weeds;
+  scars (bare ground, abandoned tunnels) last longer
+- [x] Card-only structures (`"card": true` in STRUCTS: compost, well, lamp, coop, beehive, rod): the farmer never builds them
+- [x] Edicts (`edicts.gd`): 4 rival pairs from 5 new cards (rainmaker, whose_land, take_sides, bird_vote,
+  old_promises); they steer weather, events, the farmer and the factions, and log lines name them
+- [x] Bigger farm-shaping effects (clear/overgrow/trees/plant x2, paths/fences/uproot/wither x1.5) and a cost
+  on every choice that had none (80% of choices now carry one)
+- [x] Headless impact audit (`tests/impact_test.gd`); sim_test section "card moments & edicts"
+- [ ] Played by a person for feel (is 45s of hush right? is the chime too much?)
+
 ### v0.7: two-player "join world" (in progress)
 - [ ] Multiplayer: host-authoritative ENet + UPnP, join by IP, per-player card boxes, both keep a
   copy when someone leaves. **Full plan, decisions and task checklist: `MULTIPLAYER.md`.**
@@ -331,7 +353,7 @@ Key systems added in v0.3:
 - [ ] Mouse passthrough for transparent pixels (`DisplayServer.window_set_mouse_passthrough`)
 - [ ] Optional horizontal "bottom dock" layout (Rusty's style strip) — needs a second layout
 - [ ] Targeted cards (click a tile to aim Meteorite / Sapling / Rain)
-- [ ] Sound: soft ambient + blips (no audio yet)
+- [ ] Sound: soft ambient + blips (only the card chime so far)
 - [ ] Seasons (crop availability, snow weather)
 - [ ] More farmer personality: hobbies, a pet name, diary of the day's events
 - [ ] Achievements / farm stats panel
@@ -359,6 +381,17 @@ Key systems added in v0.3:
   (a real router port mapping) without the user's OK.
 
 ## Changelog
+- 2026-10-24 - v0.9, cards that matter. Audit first (`tests/impact_test.gd`): a card changed ~3 tiles
+  while the farm changed ~53 on its own every 5 minutes, and 57% of choices cost nothing. Now: a played
+  card gets a spotlight (dim, ripple reveal, banner, chime; replayed on guests) and 45s of hush; ambient
+  churn turned down; six structures are card-only; farm-shaping effects scaled up; every choice costs
+  something (80% by the audit's count); new edicts (`edicts.gd`, 5 cards, 8 lasting rules) that keep
+  steering the farm and name themselves in the log. During the hush a card is now 21-33% of what changes
+  (was ~5%). Timers that come due in a hush are put off to a staggered moment after it (they used to
+  all fire together when it ended). The scorching keeps its old bare-ground time (longer scars there
+  blocked the wild's and the farm's comebacks). sim_test: new "card moments & edicts" section; the brood
+  and cataclysm-comeback sections hold off natural cataclysms while they wait. Verified: sim_test (6 parallel copies), net and click tests,
+  windowed spotlight screenshot.
 - 2026-10-24 - Fixed the local build's missing-template failure by caching the existing 4.7.2
   Windows templates inside the ignored `.godot/local-build/roaming/` directory and explicitly
   selecting that build profile through a temporary APPDATA value. Shared build script unchanged.

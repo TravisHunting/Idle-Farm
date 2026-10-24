@@ -17,6 +17,7 @@ var swarm: Swarm
 var tides: Tides
 var commands: Commands
 var chores: Chores
+var edicts: Edicts
 var hud: Control
 var farm_view: Control
 var weather_fx: Node2D
@@ -209,6 +210,14 @@ func _build() -> void:
 	chores.world = world
 	chores.cards = cards
 	_game_root.add_child(chores)
+	edicts = Edicts.new()
+	edicts.name = "Edicts"
+	edicts.world = world
+	edicts.director = director
+	edicts.colony = colony
+	edicts.swarm = swarm
+	cards.edicts = edicts
+	_game_root.add_child(edicts)
 
 	var layer := CanvasLayer.new()
 	layer.layer = 1

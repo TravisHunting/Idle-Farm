@@ -59,6 +59,8 @@ var log_flash := 0.0
 var name_entry := TextEntry.new(12, TextEntry.NAME)
 var name_focus := false
 var toast := {}               # {text, t}: a multiplayer message shown over the farm for a few seconds
+var spot := {}                # a played card's moment: {cells: {Vector2i: reveal at}, title, label, color, t}
+var _chime: AudioStreamPlayer
 var t := 0.0
 var btns := {
 	"menu": Rect2(136, 3, 9, 9),
@@ -78,10 +80,112 @@ func _ready() -> void:
 	Game.cards_changed.connect(_on_cards_changed)
 	Net.status_changed.connect(_on_net_status)
 	name_entry.set_text(String(Game.settings.get("name", "")))
+	if cards:
+		cards.spotlight.connect(show_spotlight)
+	_chime = AudioStreamPlayer.new()
+	_chime.stream = _make_chime()
+	_chime.volume_db = -14.0
+	add_child(_chime)
 
 
 func _on_net_status(text: String) -> void:
 	toast = {"text": text, "t": 5.0}
+
+
+# ---------------------------------------------------------------- the card spotlight
+const SPOT_LEN := 4.5
+
+
+## A card was played (here, or by the other player: net.gd replays it): the farm dims, and the
+## tiles the card changed light up one after another, rippling out from the middle of the change.
+func show_spotlight(cells: Array, title: String, label: String, color: Color) -> void:
+	var mid := Vector2.ZERO
+	for c in cells:
+		mid += Vector2(c)
+	mid /= maxf(1.0, cells.size())
+	var far := 0.5
+	for c in cells:
+		far = maxf(far, Vector2(c).distance_to(mid))
+	var at := {}
+	for c in cells:
+		at[c] = 0.3 + 1.1 * Vector2(c).distance_to(mid) / far
+	# the banner goes on the half of the farm away from the change, so it never covers it
+	var low := mid.y < World.ROWS * 0.5
+	spot = {"cells": at, "title": title, "label": label, "color": color, "t": 0.0, "low": low}
+	if _chime:
+		_chime.play()
+
+
+## A three-note rising chime, made in code like everything else (the game's only sound so far).
+func _make_chime() -> AudioStreamWAV:
+	var rate := 22050
+	var notes := [783.99, 987.77, 1318.51]   # G5 B5 E6
+	var gap := 0.09
+	var length := 1.1
+	var data := PackedByteArray()
+	data.resize(int(rate * length) * 2)
+	for i in int(rate * length):
+		var tt := float(i) / rate
+		var v := 0.0
+		for k in notes.size():
+			var t0: float = tt - k * gap
+			if t0 >= 0.0:
+				v += sin(TAU * notes[k] * t0) * exp(-t0 * 5.0) * 0.3
+		data.encode_s16(i * 2, int(clampf(v, -1.0, 1.0) * 32000.0))
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = rate
+	wav.stereo = false
+	wav.data = data
+	return wav
+
+
+func _draw_spotlight() -> void:
+	if spot.is_empty():
+		return
+	var st: float = spot["t"]
+	var a := clampf(st / 0.35, 0.0, 1.0) * clampf((SPOT_LEN - st) / 0.8, 0.0, 1.0)
+	var cells: Dictionary = spot["cells"]
+	var col: Color = spot["color"]
+	var dim := Color(0.03, 0.02, 0.08, 0.7 * a)
+	for y in World.ROWS:
+		for x in World.COLS:
+			var c := Vector2i(x, y)
+			var r := Rect2(x * 16, FARM_Y + y * 16, 16, 16)
+			if not cells.has(c):
+				draw_rect(r, dim)
+				continue
+			var since := st - float(cells[c])
+			if since < 0.0:
+				draw_rect(r, Color(dim, dim.a * 0.6))
+				continue
+			# the reveal: a bright flash that settles into a glowing outline
+			var flash := clampf(1.0 - since / 0.6, 0.0, 1.0)
+			if flash > 0.0:
+				draw_rect(r, Color(1.0, 0.95, 0.75, 0.55 * flash * a))
+			draw_rect(r.grow(-0.5), Color(col, (0.65 + 0.3 * sin(t * 6.0)) * a), false, 1.0)
+
+
+## What was chosen: drawn over the speech bubbles, on the side of the farm away from the change.
+func _draw_spot_banner() -> void:
+	if spot.is_empty():
+		return
+	var st: float = spot["t"]
+	var a := clampf(st / 0.35, 0.0, 1.0) * clampf((SPOT_LEN - st) / 0.8, 0.0, 1.0)
+	var col: Color = spot["color"]
+	var title := String(spot["title"]).to_upper()
+	var label := String(spot["label"]).to_upper()
+	var lines: Array = Art.wrap(label, 44) if label != "" else []
+	var h := 12 + lines.size() * 8
+	var y0 := FARM_Y + 3
+	if spot.get("low", false):
+		y0 = STATUS_Y - 3 - h
+	draw_rect(Rect2(4, y0, 184, h), Color(C_BG, 0.88 * a))
+	draw_rect(Rect2(4, y0, 184, 1), Color(col, a))
+	draw_rect(Rect2(4, y0 + h - 1, 184, 1), Color(col, a))
+	Art.draw_text(self, title, Vector2(96 - Art.text_width(title) / 2.0, y0 + 3), Color(col, a), Color(0, 0, 0, 0.6 * a))
+	for i in lines.size():
+		Art.draw_text(self, lines[i], Vector2(96 - Art.text_width(lines[i]) / 2.0, y0 + 11 + i * 8), Color(C_TEXT, a), Color(0, 0, 0, 0.6 * a))
 
 
 func _on_card_arrived(id: String) -> void:
@@ -127,6 +231,10 @@ func _process(delta: float) -> void:
 		toast["t"] -= delta
 		if toast["t"] <= 0.0:
 			toast = {}
+	if not spot.is_empty():
+		spot["t"] = float(spot["t"]) + delta
+		if spot["t"] >= SPOT_LEN:
+			spot = {}
 	queue_redraw()
 
 
@@ -469,6 +577,7 @@ func _draw_toast() -> void:
 func _draw_world_overlays() -> void:
 	if world == null:
 		return
+	_draw_spotlight()
 	_draw_hover_cell()
 	for f: Farmer in [world.farmer, world.friend]:
 		if f and f.bubble_t > 0.0 and f.bubble != "":
@@ -485,6 +594,7 @@ func _draw_world_overlays() -> void:
 		var p: Vector2 = fl["p"] + Vector2(0, FARM_Y)
 		if p.y > FARM_Y and p.y < STATUS_Y - 5:
 			Art.draw_text(self, fl["text"], p, c, Color(0, 0, 0, c.a * 0.7))
+	_draw_spot_banner()
 
 
 ## Outlines what a click on the farm would do: pull this weed / smash this rock, or read the mail.
@@ -674,6 +784,14 @@ func _draw_farmer_panel() -> void:
 			break
 		_txt(String(Game.PERKS[id]["name"]).to_upper() + ": " + String(Game.PERKS[id]["desc"]), Vector2(x, y), C_TEXT)
 		y += 7
+	if not Game.edicts.is_empty():
+		y += 3
+		var names: Array = []
+		for id in Game.edicts:
+			names.append(String(Game.EDICTS[id]["name"]).to_upper())
+		for l in Art.wrap("EDICTS: " + ", ".join(names), 42):
+			_txt(l, Vector2(x, y), C_GOLD)
+			y += 7
 	y += 3
 	_txt("FRIENDS", Vector2(x, y), C_GOLD)
 	y += 7
