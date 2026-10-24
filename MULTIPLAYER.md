@@ -6,13 +6,14 @@
 > whole phase is done. Keep `tests/sim_test.gd` green after every task: single player must never break.
 
 ## Status
-- **Current phase:** 2 (leaving, forking, rejoining). Phases 0 and 1 are done (2026-10-24).
-- **Last done:** 1.8 bandwidth check (`tests/run_net_test.sh` passes: two copies on localhost).
-- **Next task:** 2.1 guest slot (most of it already happens, see the Phase 1 notes), then 2.2 (the
-  guest is currently left frozen in puppet mode when the host goes away).
+- **Current phase:** 3 (connectivity: UPnP). Phases 0-2 are done (2026-10-24).
+- **Last done:** 2.5 clean exits (goodbye message); `tests/run_net_test.sh` now plays the full
+  host -> leave -> fork -> swap roles -> rejoin -> leave round trip.
+- **Next task:** 3.1 UPnP in a thread.
 - **Known blockers:** none.
-- **Multiplayer test:** `bash tests/run_net_test.sh` (~45s) starts a headless host and a guest
-  (`profile=2`) on localhost and must pass on both sides. For a look at the guest's screen, run the
+- **Multiplayer test:** `bash tests/run_net_test.sh` (~50s) starts two headless copies on localhost
+  (A = `role=host`, B = `role=guest profile=2`, ports P and P+1) and must pass on both sides. It
+  covers phases 1-2 end to end (see the header of `tests/net_runner.gd`). For a look at the guest's screen, run the
   guest without `--headless` and add `shot=<file.png>` (see `tests/net_runner.gd`).
 - **Test baseline:** `sim_test` was flaky before multiplayer work started: even with a fixed `seed=N`, a few
   faction checks fail at random ("rabbit caught in a web", "aliens cataclysm wipes them out", "the
@@ -123,15 +124,15 @@ Autoload `Net` (`scripts/net.gd`), the same node path on both sides, so RPCs jus
   Optimize (diff the grid, lower rates) only if needed.
 
 ### Phase 2: leaving, forking, rejoining
-- [ ] **2.1 Guest slot**: the guest picks the target slot before joining; while joined it autosaves
+- [x] **2.1 Guest slot**: the guest picks the target slot before joining; while joined it autosaves
   the received world there every 20s and on disconnect (keep `owner_pid` = host).
-- [ ] **2.2 Host gone** (bye or timeout) on the guest: save, set `puppet = false`, new `world_id`
+- [x] **2.2 Host gone** (bye or timeout) on the guest: save, set `puppet = false`, new `world_id`
   (`forked_from` = old), `owner_pid = my_pid`, rebuild actors from the last stream, keep playing
   solo. Log: "Your friend left. The farm carries on with you."
-- [ ] **2.3 Guest gone** on the host: keep running; the guest hand stays in `hands`, frozen.
-- [ ] **2.4 Rejoin**: a pid already in `hands` gets its hand back; a new pid gets an empty hand.
+- [x] **2.3 Guest gone** on the host: keep running; the guest hand stays in `hands`, frozen.
+- [x] **2.4 Rejoin**: a pid already in `hands` gets its hand back; a new pid gets an empty hand.
   Works on either copy (the old host can join the guest's fork).
-- [ ] **2.5 Clean exits**: quitting, going to the menu or `stop_hosting` sends `bye` first; tear
+- [x] **2.5 Clean exits**: quitting, going to the menu or `stop_hosting` sends `bye` first; tear
   down the peer when the game tree is torn down (`main.back_to_menu`, F5).
 
 ### Phase 3: connectivity
@@ -217,6 +218,23 @@ Autoload `Net` (`scripts/net.gd`), the same node path on both sides, so RPCs jus
   a guest whose host leaves stays frozen (2.2); nothing restricts the guest's settings panel yet (4.5,
   the host rejects those commands anyway).
 
+### Phase 2 notes (what exists now)
+- 2.1: `Net.join(ip, port, slot)` + `main.start_guest` save the shared world into that slot at once,
+  the normal 20s autosave keeps it fresh, and leaving (`back_to_menu`) saves it last. Choosing the slot
+  and confirming an overwrite is UI (4.2). `start_guest` saves whatever game was open before tearing it down.
+- 2.2: `Net._host_gone()` (bye, ENet disconnect or timeout) -> `main.host_left()`: puppet off,
+  `Game.fork()`, `present = {me}`, own speed back, actors rebuilt with `world.load_actors(world.to_dict())`
+  (as if loaded from the save: streamed-only actors like visitors/crows are dropped, the uid counter moves
+  past every id), log + farmer line, save.
+- 2.3/2.4: nothing new was needed: hands stay in `Game.hands` (and in both copies' saves), `Game.hand(pid)`
+  finds a returning player's hand. Verified both ways in the net test.
+- 2.5: `Net.stop(bye := true)` sends `_bye`, then disconnects only after queued packets went
+  (`peer_disconnect_later`, polling for up to ~0.3s; `mode = "closing"` meanwhile so our own disconnect events
+  are ignored). `Net.last_exit` = "bye" / "lost" tells the UI whether the other side left on purpose.
+  Window close (`NOTIFICATION_WM_CLOSE_REQUEST`) now saves and says bye too.
+- Not covered by a test yet: a real dropped connection (the "lost" / 5s-timeout path); it uses the same
+  `_host_gone()` code as a bye.
+
 ## Risks / gotchas to keep in mind
 - `World.from_dict` rebuilds actors: never call it per snapshot on the guest (task 1.4 split).
 - Anything that mutates state from a timer/tween/await bypasses the puppet gate: audit in 0.6.
@@ -237,3 +255,6 @@ Autoload `Net` (`scripts/net.gd`), the same node path on both sides, so RPCs jus
   `tests/net_runner.gd`, `tests/run_net_test.sh`; actor `net_fields/net_tick`, `World.load_grid`,
   `main.start_guest`, FX hooks. Two-copy localhost test passes on both sides; guest screenshot looks right;
   sim_test's multiplayer checks pass (the puppet check now leaves out the guest's ticking clock).
+- 2026-10-24: phase 2 done (2.1-2.5). `main.host_left()`, `Net._host_gone/_bye/last_exit`, graceful
+  `Net.stop`; `tests/net_runner.gd` rewritten as an A/B role-swap scenario; passes twice in a row on both
+  sides; sim_test multiplayer checks still pass.

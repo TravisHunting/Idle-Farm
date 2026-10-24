@@ -92,7 +92,8 @@ changed drastically and lose territory). Four factions compete for the 12x22 far
   in-game days and a save/reload, prints a faction report every 12 in-game hours and exits
   non-zero on failure (~25s per 8 days). After adding a new `class_name` script, run
   `--headless --path . --import` once to refresh the global class cache.
-- **Multiplayer test:** `bash tests/run_net_test.sh` runs a headless host + guest on localhost (~45s).
+- **Multiplayer test:** `bash tests/run_net_test.sh` runs two headless copies on localhost (~50s): join,
+  play, host leaves, guest keeps a fork, roles swap, rejoin.
 - MCP testing tip: `game_manage input_mouse` positions are in *window* pixels (2x the 192x432
   canvas in the editor's embedded view).
 - Export: see "Exporting" below.
@@ -282,7 +283,8 @@ Key systems added in v0.3:
   copy when someone leaves. **Full plan, decisions and task checklist: `MULTIPLAYER.md`.**
   - [x] Phase 0: player ids + profiles, per-player hands, command layer, actor ids, world ids, puppet mode
   - [x] Phase 1: ENet net core (`net.gd`): handshake, commands, snapshots, actor stream, effects
-  - [ ] Phase 2-5: leaving/forking, UPnP, UI, two-machine tests
+  - [x] Phase 2: when the host leaves the guest keeps a fork; rejoining restores hands; goodbye messages
+  - [ ] Phase 3-5: UPnP, UI, two-machine tests
 
 ## Next up / ideas (not started)
 - [ ] Balance pass on the deck (reward sizes vs. level scaling; how fast weirdness climbs)
@@ -315,6 +317,9 @@ Key systems added in v0.3:
   variable an explicit type instead of `:=`.
 
 ## Changelog
+- 2026-10-24 - v0.7 phase 2: leaving works both ways. When the host goes the guest keeps the farm as its
+  own fork (`main.host_left`) and can host it; a returning player gets their hand back; `Net.stop` says
+  goodbye (`_bye`, `Net.last_exit`); window close says goodbye too. Net test is now a full role-swap scenario.
 - 2026-10-24 - v0.7 phase 1: `scripts/net.gd` (autoload Net): ENet host/join with ZSTD, hello/reject
   handshake, guest commands over RPC, 1/s state snapshots (when changed), 5/s actor deltas with
   interpolation, replayed one-shot effects, guest clock smoothing; `main.start_guest`; two-copy test

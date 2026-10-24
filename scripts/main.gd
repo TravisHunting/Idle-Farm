@@ -52,6 +52,7 @@ func show_welcome(page: int = 0) -> void:
 ## Join a host's world as a guest (Net._welcome): it is kept in slot n, and runs in puppet mode.
 func start_guest(n: int, d: Dictionary) -> void:
 	if _game_root:
+		save_game()   # whatever we were playing is kept
 		Game.running = false
 		_game_root.queue_free()
 		_game_root = null
@@ -67,6 +68,21 @@ func start_guest(n: int, d: Dictionary) -> void:
 	if welcome:
 		welcome.get_parent().queue_free()
 		welcome = null
+	save_game()
+
+
+## The host went away: this guest's copy of the shared world becomes its own solo world (a fork),
+## rebuilt as if loaded from its save, and carries on (MULTIPLAYER.md: both keep a copy).
+func host_left() -> void:
+	if world == null or not Game.puppet:
+		return
+	Game.puppet = false
+	Game.fork()
+	Game.present = {Game.my_pid: true}
+	Game.time_scale = float(Game.settings.get("speed", 1))
+	world.load_actors(world.to_dict())
+	Game.add_log("Your friend went home. The farm carries on with you.")
+	world.farmer.say("Just us now, then.", 4.0)
 	save_game()
 
 
@@ -281,6 +297,7 @@ func shake(a: float) -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
 		save_game()
+		Net.stop()
 
 
 # ---------------------------------------------------------------- save/load

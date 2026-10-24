@@ -5,8 +5,11 @@ extends Node
 ##   host -> guest  _welcome  the whole world once (Game + World incl. actors)
 ##                  _state    Game + World without actors, when it changed (checked every second)
 ##                  _actors   actor deltas + one-shot effects, ~5x a second
-##                  _reject / _bye
+##                  _reject
 ##   guest -> host  _hello {protocol, version, pid, name}, _cmd {command}
+##   either way     _bye: leaving on purpose (the other side doesn't have to wait for a timeout)
+## When the host goes, the guest keeps the farm as its own world (main.host_left); when the guest
+## goes, the host carries on and the guest's hand waits in the save for them to come back.
 ## Only Net's own node path is used for RPCs, so it is the same on both machines.
 
 signal status_changed(text: String)
@@ -29,6 +32,7 @@ var status := ""
 var guest_pid := ""               # host: who is visiting
 var guest_peer := 0
 var join_slot := 1                # guest: where the shared world is kept
+var last_exit := ""               # why the other side went: "bye" (on purpose) or "lost" (dropped / timed out)
 var stats := {"sent": 0, "received": 0, "states": 0, "actors": 0}
 var verbose := false
 
@@ -99,6 +103,7 @@ func _on_peer_connected(id: int) -> void:
 func _on_peer_disconnected(id: int) -> void:
 	_hello_wait.erase(id)
 	if mode == "hosting" and id == guest_peer:
+		last_exit = "lost"
 		var pid := guest_pid
 		guest_peer = 0
 		guest_pid = ""
@@ -281,10 +286,37 @@ func _on_connection_failed() -> void:
 
 
 func _on_server_disconnected() -> void:
+	if mode == "closing":
+		return
+	if mode != "offline":
+		last_exit = "lost"
+	_host_gone()
+
+
+## The host left (said bye, closed the game or timed out): a guest keeps the farm as its own.
+func _host_gone() -> void:
 	var was_guest := mode == "guest"
-	_set_status("The host left." if was_guest else "The host closed the connection.")
-	stop()
-	# phase 2 (MULTIPLAYER.md 2.2): the guest keeps the farm as its own world from here
+	if mode == "offline":
+		return
+	stop(false)
+	if was_guest and main:
+		main.host_left()
+		_set_status("The host left. The farm is yours now.")
+	else:
+		_set_status("The host closed the connection.")
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _bye() -> void:
+	var id := multiplayer.get_remote_sender_id()
+	if mode == "guest" and id == 1:
+		last_exit = "bye"
+		_host_gone()
+	elif mode == "hosting" and id == guest_peer:
+		_on_peer_disconnected(id)
+		last_exit = "bye"
+		if _peer:
+			_peer.disconnect_peer(id)
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -407,13 +439,27 @@ func _send(id: int, method: String, b: PackedByteArray) -> void:
 	rpc_id(id, method, b)
 
 
-## Close the connection (no goodbyes yet: phase 2.5).
-func stop() -> void:
+## Close the connection; with `bye`, tell the other side first (and let it arrive, up to ~0.3s)
+## so it knows we left on purpose instead of waiting for a timeout.
+func stop(bye: bool = true) -> void:
+	var was_hosting := mode == "hosting"
+	if _peer and bye and (mode == "guest" or (was_hosting and guest_peer != 0)):
+		var to := 1 if mode == "guest" else guest_peer
+		_bye.rpc_id(to)
+		var pp := _peer.get_peer(to)
+		mode = "closing"   # our own disconnect events below are not news
+		if pp:
+			pp.peer_disconnect_later()
+		for i in 30:
+			_peer.poll()
+			if pp == null or pp.get_state() == ENetPacketPeer.STATE_DISCONNECTED:
+				break
+			OS.delay_msec(10)
 	if _peer:
 		_peer.close()
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 	_peer = null
-	if mode == "hosting" and guest_pid != "":
+	if was_hosting and guest_pid != "":
 		Game.present.erase(guest_pid)
 	mode = "offline"
 	guest_peer = 0
